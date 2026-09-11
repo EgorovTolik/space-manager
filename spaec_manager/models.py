@@ -140,6 +140,7 @@ class Ruleset:
     size_max: Optional[int] = None              # жёсткий максимум клеток (default None)
     convexity_weight: str = "soft"              # "soft" (текущий) — штраф; "hard" — запрет вогнутых
     fill_all: bool = False                      # использовать всю доступную площадь
+    touch_all: bool = False                     # все кластеры обязаны примыкать друг к другу (docs/04 §9)
 
 
 # ---------------------------------------------------------------------------

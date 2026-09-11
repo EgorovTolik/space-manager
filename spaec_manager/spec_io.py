@@ -196,6 +196,10 @@ def _parse_rules(section: object, types: Dict[str, ClusterType]) -> Ruleset:
     if not isinstance(fill_all, bool):
         raise SpecValidationError("'rules.fillAll' должен быть boolean (получено: {!r})".format(fill_all))
 
+    touch_all = section.get("touchAll", False)
+    if not isinstance(touch_all, bool):
+        raise SpecValidationError("'rules.touchAll' должен быть boolean (получено: {!r})".format(touch_all))
+
     return Ruleset(
         connectivity=connectivity,
         adjacency_forbidden=forbidden,
@@ -204,6 +208,7 @@ def _parse_rules(section: object, types: Dict[str, ClusterType]) -> Ruleset:
         size_max=size_max,
         convexity_weight=convexity_weight,
         fill_all=bool(fill_all),
+        touch_all=bool(touch_all),
     )
 
 

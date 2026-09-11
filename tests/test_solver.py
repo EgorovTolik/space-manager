@@ -319,3 +319,127 @@ clusters:
     inst = result.instances["a1"]
     assert abs(len(inst.actual_cells) - 12) <= 4
     assert is_connected(inst.actual_cells, 8)
+
+
+# ---------------------------------------------------------------------------
+# touchAll (docs/04 §9): все кластеры обязаны примыкать друг к другу
+# ---------------------------------------------------------------------------
+
+def test_touch_all_produces_single_connected_group():
+    from spaec_manager.rules import all_clusters_touch
+
+    spec = _spec("""
+grid: {width: 12, height: 8}
+types:
+  ROOM: {symbol: "R"}
+  CORRIDOR: {symbol: "C"}
+  GARDEN: {symbol: "G"}
+rules:
+  touchAll: true
+clusters:
+  - {id: room1, type: ROOM, areaPercent: 40}
+  - {id: corridor1, type: CORRIDOR, areaPercent: 35}
+  - {id: garden1, type: GARDEN, areaPercent: 25}
+""")
+    result = solve(spec)
+    assert result.feasible, result.infeasible_reason
+
+    # Граф кластеров связан: все примыкают друг к другу.
+    assert all_clusters_touch(result.instances.values()) is True
+
+    # Жёсткие условия не пострадали: каждый кластер связен и цели близки.
+    for inst in result.instances.values():
+        assert len(inst.actual_cells) > 0
+        assert is_connected(inst.actual_cells, 8), inst.id
+    targets = {"room1": 38, "corridor1": 33, "garden1": 24}  # F = 96
+    for cid, t in targets.items():
+        assert abs(len(result.instances[cid].actual_cells) - t) <= 8, (cid, len(result.instances[cid].actual_cells))
+
+
+def test_touch_all_default_off_unchanged_behavior():
+    """Без touchAll кластеры могут быть разнесены — поведение не изменилось."""
+    from spaec_manager.rules import all_clusters_touch
+
+    spec = _spec("""
+grid: {width: 10, height: 8}
+types:
+  A: {symbol: "A"}
+  B: {symbol: "B"}
+rules: {}
+clusters:
+  - {id: a1, type: A, areaPercent: 40}
+  - {id: b1, type: B, areaPercent: 40}
+""")
+    assert spec.rules.touch_all is False
+    result = solve(spec)
+    assert result.feasible, result.infeasible_reason
+    # Разнесённость не запрещена: связность графа здесь не требуется.
+    _ = all_clusters_touch(result.instances.values())
+
+
+def test_touch_all_with_preset_must_touch_preset(tmp_path):
+    preset = tmp_path / "preset.txt"
+    preset.write_text("AA...\n.....\n.....\n.....\n")
+    spec = _spec("""
+grid: {width: 5, height: 4}
+presetFile: %s
+types:
+  A: {symbol: "A"}
+  B: {symbol: "B"}
+rules:
+  touchAll: true
+clusters:
+  - {id: b1, type: B, areaPercent: 60}
+""" % preset)
+    result = solve(spec)
+    assert result.feasible, result.infeasible_reason
+
+    preset_cells = set(result.instances["preset_A_1"].actual_cells)
+    b_cells = result.instances["b1"].actual_cells
+    assert clusters_touch(b_cells, preset_cells), "при touchAll B обязан примыкать к preset-A"
+
+
+def test_touch_all_infeasible_split_grid(tmp_path):
+    """Стена блокировок по всей высоте разрезает сетку на две изолированные
+    8-компоненты. size.min не даёт уместить оба кластера в одну сторону,
+    а через стену примыкнуть нельзя: второй кластер не может примыкнуть."""
+    blocked = tmp_path / "blocked.txt"
+    blocked.write_text("\n".join(["....*...."] * 4) + "\n")
+    spec = _spec("""
+grid: {width: 9, height: 4}
+blockedFile: %s
+types:
+  A: {symbol: "A"}
+  B: {symbol: "B"}
+rules:
+  size: {min: 10}
+  touchAll: true
+clusters:
+  - {id: a1, type: A, areaPercent: 50}
+  - {id: b1, type: B, areaPercent: 50}
+""" % blocked)
+    result = solve(spec)
+    assert not result.feasible
+    assert result.infeasible_reason is not None
+    assert "touchAll" in result.infeasible_reason, result.infeasible_reason
+    for inst in result.instances.values():
+        assert not inst.actual_cells
+
+
+def test_no_touch_all_same_split_grid_feasible(tmp_path):
+    """Та же сетка без touchAll — кластеры можно разнести по сторонам стены."""
+    blocked = tmp_path / "blocked.txt"
+    blocked.write_text("\n".join(["....*...."] * 4) + "\n")
+    spec = _spec("""
+grid: {width: 9, height: 4}
+blockedFile: %s
+types:
+  A: {symbol: "A"}
+  B: {symbol: "B"}
+rules: {}
+clusters:
+  - {id: a1, type: A, areaPercent: 50}
+  - {id: b1, type: B, areaPercent: 50}
+""" % blocked)
+    result = solve(spec)
+    assert result.feasible, result.infeasible_reason

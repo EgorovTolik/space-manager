@@ -130,6 +130,42 @@ clusters:
     assert spec.rules.fill_all is True
 
 
+def test_touch_all_parsing():
+    text = """
+grid: {{width: 4, height: 4}}
+types:
+  ROOM: {{symbol: "R"}}
+rules:
+  touchAll: true
+clusters:
+  - id: room1
+    type: ROOM
+    areaPercent: 50
+""".format()
+    spec = parse_spec(text)
+    assert spec.rules.touch_all is True
+
+    # Дефолт (поле отсутствует) — false.
+    spec2 = parse_spec(text.replace("  touchAll: true\n", ""))
+    assert spec2.rules.touch_all is False
+
+
+def test_error_touch_all_not_boolean():
+    text = """
+grid: {{width: 4, height: 4}}
+types:
+  ROOM: {{symbol: "R"}}
+rules:
+  touchAll: yes-please
+clusters:
+  - id: room1
+    type: ROOM
+    areaPercent: 50
+""".format()
+    with pytest.raises(SpecValidationError, match="touchAll"):
+        parse_spec(text)
+
+
 def test_blocked_corner_f96(tmp_path):
     # 10×10 с заблокированным левым верхним углом 2×2 → F = 96 (docs/03 §2).
     blocked_lines = ["**........", "**........"] + [".........."] * 8

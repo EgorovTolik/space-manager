@@ -1,0 +1,46 @@
+# =====================================================================
+# Пример touchAll (docs/04 §9): все кластеры обязаны примыкать друг к
+# другу — единый «ком» без зазоров между кластерами.
+# Запуск: python -m spaec_manager place examples/spec_touchall.yaml
+# =====================================================================
+
+grid:
+  width: 12
+  height: 8
+
+blockedFile: ./blocked_touchall.txt   # одна заблокированная клетка в углу → F = 95
+presetFile: null
+
+types:
+  ROOM:     { symbol: "R", name: "Комната" }
+  CORRIDOR: { symbol: "C", name: "Коридор" }
+  GARDEN:   { symbol: "G", name: "Сад" }
+
+rules:
+  connectivity: 8
+  adjacency:
+    forbidden: []                  # default-open: любые пары типов разрешены
+    allow: null
+  size:
+    min: null
+    max: null
+  convexity:
+    weight: soft
+  fillAll: false
+  touchAll: true                   # все кластеры примыкают друг к другу (docs/04 §9)
+
+clusters:
+  - id: room1
+    type: ROOM
+    areaPercent: 40                # цель = round(95 * 40 / 100) = 38 клеток
+    shape: free
+
+  - id: corridor1
+    type: CORRIDOR
+    areaPercent: 35                # цель = round(95 * 35 / 100) = 33 клетки
+    shape: free
+
+  - id: garden1
+    type: GARDEN
+    areaPercent: 25                # цель = round(95 * 25 / 100) = 24 клетки
+    shape: free

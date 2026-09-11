@@ -96,12 +96,46 @@ def test_cli_place_examples_success(tmp_path):
     assert "== КАРТА ==" in out
     assert "== ТАБЛИЦА: запрошено / фактически / отклонение ==" in out
     assert "room1" in out and "room2" in out and "corridor1" in out
-    # Карта 10 строк по 10 символов (сетка 10×10).
+    # Карта: строки по 50 символов (сетка 50×50 в examples/spec_basic.yaml).
+    import re as _re
+
     map_lines = [
         line for line in out.splitlines()
-        if len(line) == 10 and set(line) <= set("RC.*")
+        if _re.fullmatch(r"[RWC.*]{50}", line) is not None
     ]
-    assert len(map_lines) >= 8, "на карте почти нет заполненных строк?"
+    assert len(map_lines) >= 40, "на карте почти нет заполненных строк?"
+
+
+# ---------------------------------------------------------------------------
+# 2b. CLI: examples/spec_touchall.yaml (docs/04 §9) → exit 0, кластеры примыкают
+# ---------------------------------------------------------------------------
+
+def test_cli_place_examples_touchall(tmp_path):
+    from spaec_manager.report import build_report
+    from spaec_manager.rules import all_clusters_touch
+    from spaec_manager.spec_io import load_spec
+    from spaec_manager.solver import solve
+
+    proc = _run_cli("place", str(EXAMPLES / "spec_touchall.yaml"), cwd=tmp_path)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    out = proc.stdout
+    assert "== КАРТА ==" in out
+    assert "room1" in out and "corridor1" in out and "garden1" in out
+    # Карта 8 строк по 12 символов (сетка 12×8).
+    map_lines = [
+        line for line in out.splitlines()
+        if len(line) == 12 and set(line) <= set("RCG.*")
+    ]
+    assert len(map_lines) == 8, "карта touchAll-примера должна быть 8 строк"
+
+    # Сквозная проверка семантики: все кластеры образуют единый примыкающий ком.
+    spec = load_spec(str(EXAMPLES / "spec_touchall.yaml"))
+    assert spec.rules.touch_all is True
+    result = solve(spec)
+    assert result.feasible, result.infeasible_reason
+    assert all_clusters_touch(result.instances.values()) is True
+    # Отчёт собирается без ошибок и содержит карту.
+    assert "== КАРТА ==" in build_report(result, spec.types)
 
 
 # ---------------------------------------------------------------------------

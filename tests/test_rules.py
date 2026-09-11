@@ -11,6 +11,7 @@ from spaec_manager.models import Ruleset
 from spaec_manager.rules import (
     adjacency_ok,
     adjacency_violation,
+    all_clusters_touch,
     allocate_proportional,
     circle_deviation,
     clusters_touch,
@@ -367,3 +368,51 @@ class TestSoftCost:
     def test_mismatched_lengths_raise(self):
         with pytest.raises(ValueError):
             soft_cost([1, 2], [1], [1.0, 1.0])
+
+
+# ---------------------------------------------------------------------------
+# all_clusters_touch (docs/04 §9, touchAll)
+# ---------------------------------------------------------------------------
+
+class TestAllClustersTouch:
+    @staticmethod
+    def _inst(cells):
+        from spaec_manager.models import ClusterInstance
+
+        return ClusterInstance(id="x", type_id="T", area_percent=10.0, actual_cells=list(cells))
+
+    def test_empty_list_is_true(self):
+        assert all_clusters_touch([]) is True
+
+    def test_single_instance_is_true(self):
+        assert all_clusters_touch([self._inst([(0, 0)])]) is True
+
+    def test_connected_blob_is_true(self):
+        # Три кластера в едином коме: A—B и B—C соприкасаются.
+        a = self._inst([(0, 0), (1, 0)])
+        b = self._inst([(2, 0), (3, 0)])
+        c = self._inst([(3, 1)])
+        assert all_clusters_touch([a, b, c]) is True
+
+    def test_diagonal_contact_counts(self):
+        # Диагональ — тоже примыкание (8-окрестность).
+        a = self._inst([(0, 0)])
+        b = self._inst([(1, 1)])
+        assert all_clusters_touch([a, b]) is True
+
+    def test_two_disjoint_pieces_is_false(self):
+        a = self._inst([(0, 0), (1, 0)])
+        b = self._inst([(5, 5), (6, 5)])
+        assert all_clusters_touch([a, b]) is False
+
+    def test_chain_of_three_with_gap_in_middle_is_false(self):
+        # A—B соединены, C оторван.
+        a = self._inst([(0, 0)])
+        b = self._inst([(1, 0)])
+        c = self._inst([(9, 9)])
+        assert all_clusters_touch([a, b, c]) is False
+
+    def test_instance_without_cells_is_false_when_others_exist(self):
+        a = self._inst([(0, 0)])
+        empty = self._inst([])
+        assert all_clusters_touch([a, empty]) is False

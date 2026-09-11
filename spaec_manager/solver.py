@@ -16,6 +16,12 @@
     целиком лежащие в свободных клетках: отклонение 0 ≤ CIRCLE_TOL, т.е. такие
     кандидаты гарантированно проходят is_circle.
   Кандидаты отсортированы по близости размера к цели и выпуклости (fill_ratio).
+- touchAll (docs/04 §9): при включённом флаге каждый следующий кластер обязан
+  соприкасаться с уже поставленными (preset учитывается как поставленный
+  заранее) — кандидаты, не примыкающие к общему кому, отбрасываются; первый
+  кластер без preset'ов ставится свободно. Финальная проверка связности
+  графа кластеров (`all_clusters_touch`) страхует случай нескольких
+  изолированных preset-групп.
 - Постановка + forward-checking: остаток свободной площади ≥ сумме жёстких
   минимумов остальных; крупнейшая связная свободная компонента ≥ максимуму
   этих минимумов; branch-and-bound по частичному soft_cost.
@@ -64,6 +70,7 @@ from .models import (
 )
 from .rules import (
     allocate_proportional,
+    all_clusters_touch,
     fill_ratio,
     is_circle,
     is_connected,
@@ -396,6 +403,13 @@ class _BacktrackingSolver:
                         for n in _neighbours8(c, self.free):
                             self.bad_by_type[t2].add(n)
 
+        # touchAll (docs/04 §9): объединение клеток всех уже поставленных
+        # экземпляров — preset'ы считаются поставленными заранее.
+        self.touch_all = bool(rules.touch_all)
+        self.placed_union: Set[Coord] = set()
+        for p in self.presets:
+            self.placed_union.update(p.actual_cells)
+
     # -- служебное -----------------------------------------------------------
 
     def _budget_ok(self) -> bool:
@@ -440,6 +454,7 @@ class _BacktrackingSolver:
                         delta.append((t2, n))
         for t2, n in delta:
             self.bad_by_type[t2].add(n)
+        self.placed_union.update(cells)
         self._bad_deltas.append(delta)
 
     def _unapply(self, idx: int, inst: ClusterInstance) -> None:
@@ -455,6 +470,7 @@ class _BacktrackingSolver:
         for t2, n in delta:
             if n in self.free:  # клетка всё ещё свободна — снимаем запрет
                 self.bad_by_type[t2].discard(n)
+        self.placed_union.difference_update(cells)
 
     # -- генерация кандидатов --------------------------------------------------
 
@@ -500,6 +516,10 @@ class _BacktrackingSolver:
         ok.sort(key=lambda cf: (abs(len(cf[0]) - t), -cf[1], min(cf[0])))
         self.rng.shuffle(ok)
         return ok[:BRANCH_CAP]
+
+    def _touches_placed(self, cells: FrozenSet[Coord]) -> bool:
+        """Примыкает ли кандидат к общему кому уже поставленных (touchAll)."""
+        return any(_neighbours8(c, self.placed_union) for c in cells)
 
     def _candidate_reason(self, idx: int, inst: ClusterInstance, free_avail: Set[Coord]) -> None:
         """Причина отсутствия кандидатов (docs/05 §7)."""
@@ -574,6 +594,19 @@ class _BacktrackingSolver:
         if not cands:
             self._candidate_reason(idx, inst, free_avail)
             return False
+        # touchAll (docs/04 §9): жёсткое требование примыкания к уже поставленным.
+        if self.touch_all and self.placed_union:
+            touched = [cf for cf in cands if self._touches_placed(cf[0])]
+            if not touched:
+                # Кандидаты были, но ни один не примыкает к общему кому.
+                self._record_reason(
+                    "touch",
+                    "режим touchAll: кластер '{}' (тип {}) не может примыкать к уже "
+                    "поставленным кластерам — свободные клетки рядом с общим комом "
+                    "отсутствуют или запрещены правилом соседства".format(inst.id, inst.type_id),
+                )
+                return False
+            cands = touched
 
         for cells, fr in cands:
             term = abs(len(cells) - t) + DEFAULT_LAMBDA * (1.0 - fr)
@@ -642,8 +675,17 @@ class _BacktrackingSolver:
                 warnings.append(
                     "fillAll: осталось {} незаполненных клеток из {}".format(leftover, self.free_initial)
                 )
-            feasible = True
-            reason: Optional[str] = None
+            if self.rules.touch_all and not all_clusters_touch(instances_out.values()):
+                # Поиск требует примыкания каждого нового кластера к предыдущим,
+                # но несколько изолированных preset-групп могли остаться вне кома.
+                feasible = False
+                reason: Optional[str] = (
+                    "режим touchAll: не все кластеры образуют единый примыкающий ком — "
+                    "часть неподвижных preset-кластеров недостижима для остальных"
+                )
+            else:
+                feasible = True
+                reason = None
         elif self.to_place:
             for inst in self.order:
                 inst.actual_cells = []

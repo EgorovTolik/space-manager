@@ -5,7 +5,8 @@
 
 Источники:
 - docs/04-rules-and-adjacency.md — правила (связность 8, adjacency default-open
-  + blacklist, size, формы free/rectangle/circle, выпуклость fill_ratio, fillAll).
+  + blacklist, size, формы free/rectangle/circle, выпуклость fill_ratio, fillAll,
+  примыкание всех кластеров touchAll).
 - docs/05-solver-design.md §2 (целевая функция), §4 (валидаторы и оценщики).
 
 Закреплённое решение по `is_circle` (открытое уточнение docs/07 §6 / docs/05 §6):
@@ -224,6 +225,37 @@ def adjacency_violation(
     if not clusters_touch(cells_a, cells_b):
         return False
     return not adjacency_ok(type_a, type_b, rules)
+
+
+def all_clusters_touch(instances: Iterable["object"]) -> bool:
+    """Связен ли граф кластеров: все примыкают друг к другу (docs/04 §9).
+
+    Вершина = экземпляр кластера (объект с полем `actual_cells`), ребро =
+    соприкосновение клеток по 8-окрестности (`clusters_touch`). Граф связан,
+    если из любого кластера можно «дойти» до любого другого через цепочки
+    примыкающих. Зазоры/дырки внутри общего кома не запрещаются.
+
+    Пустой список и одиночный кластер (в т.ч. без клеток) — True (vacuous).
+    Экземпляр без клеток при наличии других кластеров рассматривается как
+    не примыкающий ни к чему (ребра у него нет → граф несвязен).
+    """
+    insts = list(instances)
+    if len(insts) <= 1:
+        return True
+    nonempty_idx = [i for i, ins in enumerate(insts) if ins.actual_cells]
+    if not nonempty_idx or len(nonempty_idx) != len(insts):
+        # Есть экземпляр без клеток — он не может примыкать ни к чему.
+        return False
+    start = 0
+    seen = {start}
+    stack = [start]
+    while stack:
+        i = stack.pop()
+        for j in range(len(insts)):
+            if j not in seen and clusters_touch(insts[i].actual_cells, insts[j].actual_cells):
+                seen.add(j)
+                stack.append(j)
+    return len(seen) == len(insts)
 
 
 # ---------------------------------------------------------------------------
