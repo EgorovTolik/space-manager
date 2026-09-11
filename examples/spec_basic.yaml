@@ -1,0 +1,44 @@
+# =====================================================================
+# Базовая спекация размещения (docs/03 §1, пример 10×10).
+# Запуск: python -m spaec_manager place examples/spec_basic.yaml
+# =====================================================================
+
+grid:
+  width: 50
+  height: 50
+
+blockedFile: null   # маска 2×2 в левом верхнем углу → F = 96
+presetFile: null                   # предзаполнения нет (пример маски — preset_example.txt)
+
+types:
+  ROOM1:     { symbol: "R", name: "Комната-1" }
+  ROOM2:     { symbol: "W", name: "Комната-2" }
+  CORRIDOR: { symbol: "C", name: "Коридор" }
+
+rules:
+  connectivity: 8
+  adjacency:
+    forbidden: []                  # default-open: любые пары типов разрешены
+    allow: null
+  size:
+    min: null
+    max: null
+  convexity:
+    weight: soft
+  fillAll: false
+
+clusters:
+  - id: room1
+    type: ROOM1
+    areaPercent: 26                # цель = round(96 * 30 / 100) = 29 клеток
+    shape: free
+
+  - id: room2
+    type: ROOM2
+    areaPercent: 15
+    shape: free
+
+  - id: corridor1
+    type: CORRIDOR
+    areaPercent: 10                # цель = round(96 * 40 / 100) = 38 клеток
+    shape: circle
