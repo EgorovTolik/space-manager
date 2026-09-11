@@ -53,6 +53,7 @@ PlacementResult.warnings содержит предупреждения уров�
 автогенерирует report.build_report (docs/06 §5).
 """
 
+import heapq
 import math
 import random
 import time
@@ -166,23 +167,65 @@ def _grow_compact(free_avail: Set[Coord], seed: Coord, size: int) -> Optional[Fr
     открытой сетке компактные почти-квадратные формы. Открытая 8-компонента
     размера ≥ size гарантирует завершение: пустой frontier означает, что
     область уже вся компонента, что противоречит |компоненте| ≥ size > |регион|.
+
+    Реализация: расстояние каждой клетки вычисляется один раз при добавлении
+    в frontier и хранится в куче (heap) по ключу (dist, координаты) — выбор
+    min-клетки за O(log n), а не перебор всего frontier на каждом шаге
+    (O(frontier) × O(size) на большом росте). Результат побитово идентичен
+    перебору: та же пара (минимальное расстояние, минимальные координаты).
     """
     if size < 1 or seed not in free_avail:
         return None
+    return _grow_snapshots(free_avail, seed, [size]).get(size)
+
+
+def _grow_snapshots(
+    free_avail: Set[Coord],
+    seed: Coord,
+    sizes: List[int],
+) -> Dict[int, FrozenSet[Coord]]:
+    """Один жадный рост от `seed` с фиксацией срезов при каждом нужном размере.
+
+    Жадное правило выбора следующей клетки не зависит от целевого размера, так
+    что область размера s — точный префикс области большего размера s'. Поэтому
+    вместо роста «с нуля» для каждого размера (O(размеров × клеток)) делается
+    ОДИН рост до максимального размера, а при достижении каждого запрошенного
+    размера снимается снапшот. Результат идентичен набору отдельных вызовов
+    _grow_compact: {s: _grow_compact(free_avail, seed, s)} для достигнутых s.
+    """
+    targets = sorted({s for s in sizes if s >= 1})
+    if not targets or seed not in free_avail:
+        return {}
+    sx, sy = seed
     region = {seed}
-    frontier = set(_neighbours8(seed, free_avail))
-    frontier.discard(seed)
-    while len(region) < size:
-        if not frontier:
-            return None
-        sx, sy = seed
-        best = min(frontier, key=lambda n: (max(abs(n[0] - sx), abs(n[1] - sy)), n))
-        region.add(best)
-        frontier.discard(best)
-        for m in _neighbours8(best, free_avail):
-            if m not in region:
-                frontier.add(m)
-    return frozenset(region)
+    frontier = set()
+    heap: List[Tuple[int, Coord]] = []
+    for n in _neighbours8(seed, free_avail):
+        if n != seed:
+            frontier.add(n)
+            heapq.heappush(heap, (max(abs(n[0] - sx), abs(n[1] - sy)), n))
+    out: Dict[int, FrozenSet[Coord]] = {}
+    for need in targets:
+        while len(region) < need:
+            # Убираем устаревшие записи кучи (клетка уже в region / вне frontier).
+            while heap:
+                _d, c = heap[0]
+                if c in frontier and c not in region:
+                    break
+                heapq.heappop(heap)
+            if not heap:
+                return out  # область упёрлась в компоненту — большие s недостижимы
+            _d, best = heapq.heappop(heap)
+            if best not in frontier or best in region:
+                continue
+            region.add(best)
+            frontier.discard(best)
+            for m in _neighbours8(best, free_avail):
+                if m not in region and m not in frontier:
+                    frontier.add(m)
+                    heapq.heappush(heap, (max(abs(m[0] - sx), abs(m[1] - sy)), m))
+        out[need] = frozenset(region)
+    return out
 
 
 def _enum_bounded(
@@ -489,23 +532,42 @@ class _BacktrackingSolver:
         t = self.targets[inst.id]
         found: Dict[FrozenSet[Coord], float] = {}
 
+        def add(cells: FrozenSet[Coord]) -> None:
+            # fill_ratio — только для новых регионов (setdefault с ленивым ключом)
+            if cells not in found:
+                found[cells] = fill_ratio(cells)
+
         if inst.shape is Shape.CIRCLE:
             for cells in _disks_of(free_avail, lo, hi, t):
-                found.setdefault(cells, fill_ratio(cells))
+                add(cells)
         else:
-            for s in _sizes_to_try(t, lo, hi, self.rules):
+            # Seed-выборки и список размеров не зависят от шага — один раз на вызов.
+            seeds = _sample_seeds(free_avail, SEEDS_CAP)
+            enum_seeds = _sample_seeds(free_avail, ENUM_SEEDS_CAP)
+            sizes_list = _sizes_to_try(t, lo, hi, self.rules)
+            if inst.shape is Shape.FREE:
+                # free-форма: рост на каждый размер — префикс одного роста до
+                # максимального размера (см. _grow_snapshots). Снапшоты считаются
+                # один раз на seed; в `found` регионы добавляются в исходном
+                # порядке (размер → seed), как при поштучных вызовах.
+                snapshots = [
+                    _grow_snapshots(free_avail, seed, sizes_list) for seed in seeds
+                ]
+            else:
+                snapshots = None
+            for s in sizes_list:
                 if inst.shape is Shape.RECTANGLE:
                     for cells in _rectangles_of(free_avail, s):
-                        found.setdefault(cells, fill_ratio(cells))
+                        add(cells)
                 else:
-                    for seed in _sample_seeds(free_avail, SEEDS_CAP):
-                        region = _grow_compact(free_avail, seed, s)
-                        if region is not None and len(region) == s:
-                            found.setdefault(region, fill_ratio(region))
+                    for snaps in snapshots:
+                        region = snaps.get(s)
+                        if region is not None:
+                            add(region)
                     if s <= ENUM_MAX_SIZE:
-                        for seed in _sample_seeds(free_avail, ENUM_SEEDS_CAP):
+                        for seed in enum_seeds:
                             for region in _enum_bounded(free_avail, seed, s):
-                                found.setdefault(region, fill_ratio(region))
+                                add(region)
 
         # Жёсткий фильтр связности (актуален при connectivity=4).
         ok: List[Tuple[FrozenSet[Coord], float]] = [
