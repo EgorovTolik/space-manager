@@ -17,6 +17,7 @@ export const ru = {
   infeasibleMark: 'размещение не удалось',
   warningsCountLabel: '⚠ предупреждения:',
   parseErrorBanner: 'Ошибка разбора отчёта',
+  expandDetails: 'подробнее',
   noReportLoaded: 'файл не загружен',
 
   // Заглушка сцены до загрузки (04 §1)
@@ -39,6 +40,7 @@ export const ru = {
   presetTop: 'Сверху',
   presetFront: 'Спереди',
   pngSnapshotButton: 'PNG',
+  pngSnapshotTitle: 'Сохранить текущий кадр сцены в PNG',
 
   // Список комнат (04 §5)
   panelRooms: 'КОМНАТЫ',
@@ -59,7 +61,7 @@ export const ru = {
   infoCellsLabel: 'клеток:',
   infoAreaLabel: 'площадь:',
   infoBboxLabel: 'габариты (bbox):',
-  infoTableRowTitle: 'строка таблицы',
+  infoTableRowTitle: '— строка таблицы:',
   infoSharePrefix: 'доля',
   deselectButton: 'Снять выделение',
 
@@ -72,6 +74,8 @@ export const ru = {
   warningsBannerExpand: 'Развернуть',
 
   // Строки-шаблоны
+  infoSymbolTypeLine: (symbol: string, typeId: string | null): string =>
+    `символ ${symbol} · тип ${typeId ?? '—'}`,
   gridStatus: (w: number, h: number): string => `${w}×${h}`,
   roomsCount: (n: number): string => String(n),
   areaValue: (value: number, unitLabel: string): string =>

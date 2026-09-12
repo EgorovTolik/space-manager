@@ -173,3 +173,130 @@ button.active {
   margin: 4px 0;
   padding-left: 18px;
 }
+
+/* --- подзадача 5: сцена, панели, таблицы (ТЗ 04) ---------------------------- */
+
+.chip {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  vertical-align: -1px;
+  margin-right: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.rooms-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.rooms-table th,
+.rooms-table td {
+  text-align: left;
+  padding: 2px 4px;
+  border-bottom: 1px solid #eee;
+  white-space: nowrap;
+}
+
+.rooms-table tbody tr {
+  cursor: pointer;
+}
+
+.rooms-table tbody tr:hover {
+  background: #f0f4f8;
+}
+
+.rooms-table tbody tr.selected {
+  background: #e8eff7;
+  font-weight: bold;
+}
+
+.unmatched-block {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.unmatched-block h3 {
+  font-size: 11px;
+  margin: 0 0 4px;
+  color: #966;
+}
+
+.legend-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+  font-size: 12px;
+}
+
+.info-table-row {
+  border-top: 1px dashed #ddd;
+  margin-top: 6px;
+  padding-top: 4px;
+  font-size: 12px;
+}
+
+.param-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+}
+
+.param-row label {
+  color: #555;
+  flex: 1;
+}
+
+.params-input {
+  width: 72px;
+  font: inherit;
+  padding: 2px 4px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+}
+
+.opacity-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.opacity-value {
+  min-width: 32px;
+  text-align: right;
+  color: #555;
+}
+
+.infeasible-mark {
+  color: #c00;
+}
+
+.file-error {
+  color: #900;
+  background: #fde3e3;
+  border: 1px solid #e5b0b0;
+  border-radius: 3px;
+  padding: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.warnings-banner ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+/* Подписи комнат на сцене (drei Html, ТЗ 04 §8) */
+.room-label {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 11px;
+  white-space: nowrap;
+}
