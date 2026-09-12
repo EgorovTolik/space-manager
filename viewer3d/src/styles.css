@@ -1,0 +1,175 @@
+/* viewer3d: плотная трёхколоночная вёрстка (ТЗ 04 §1), CSS без UI-фреймворка. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #222;
+  background: #fff;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 1280px;
+}
+
+.app-header h1 {
+  font-size: 15px;
+  margin: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid #ddd;
+}
+
+.app-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 260px 1fr 300px;
+  min-height: 0;
+}
+
+.col-left,
+.col-right {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.col-left {
+  border-right: 1px solid #ddd;
+}
+
+.col-right {
+  border-left: 1px solid #ddd;
+}
+
+.col-center {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.panel {
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 8px;
+  background: #fafafa;
+}
+
+.panel h2 {
+  font-size: 12px;
+  margin: 0 0 6px;
+  letter-spacing: 0.03em;
+  color: #555;
+}
+
+.muted {
+  color: #888;
+}
+
+button {
+  font: inherit;
+  padding: 3px 8px;
+  margin: 2px 4px 2px 0;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  color: #aaa;
+  cursor: default;
+  background: #f4f4f4;
+}
+
+button.active {
+  border-color: #356;
+  background: #e8eff7;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.warnings-banner {
+  background: #fff6d6;
+  border-bottom: 1px solid #e6d9a0;
+  padding: 4px 8px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.warnings-banner .infeasible {
+  background: #fde3e3;
+  color: #900;
+  border-bottom: 1px solid #e5b0b0;
+  padding: 4px 8px;
+  white-space: pre-wrap;
+}
+
+.scene-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.scene-wrap canvas {
+  display: block;
+}
+
+.scene-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #777;
+  pointer-events: none;
+}
+
+.status-line {
+  padding: 4px 8px;
+  border-top: 1px solid #eee;
+  color: #555;
+  font-size: 12px;
+}
+
+.params-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 8px;
+  margin: 0 0 6px;
+}
+
+.params-list dt {
+  color: #555;
+}
+
+.params-list dd {
+  margin: 0;
+  text-align: right;
+}
+
+.rooms-list,
+.file-status {
+  margin: 4px 0;
+  padding-left: 18px;
+}
