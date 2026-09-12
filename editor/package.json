@@ -1,0 +1,34 @@
+{
+  "name": "spaec-config-editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Веб-редактор входных файлов spaec-manager (ТЗ: docs-editor/)",
+  "scripts": {
+    "dev": "concurrently -n vite,api -c cyan,green \"vite\" \"tsx server/index.ts\"",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx server/index.ts",
+    "test": "vitest run",
+    "e2e": "npm run build && playwright test"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "js-yaml": "^4.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/express": "^5.0.6",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^3.0.2"
+  }
+}

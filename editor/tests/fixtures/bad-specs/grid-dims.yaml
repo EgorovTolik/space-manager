@@ -1,0 +1,29 @@
+# V-GRID-DIMS: width = 0 — не положительное целое (editor: SpecParseError; spaec_manager: exit 2)
+grid:
+  width: 0
+  height: 10
+
+blockedFile: null
+presetFile: null
+
+types:
+  A: { symbol: "A", name: null }
+
+rules:
+  connectivity: 8
+  adjacency:
+    forbidden: []
+    allow: null
+  size:
+    min: null
+    max: null
+  convexity:
+    weight: soft
+  fillAll: false
+  touchAll: false
+
+clusters:
+  - id: c1
+    type: A
+    areaPercent: 50
+    shape: free

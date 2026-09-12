@@ -1,0 +1,33 @@
+# В-CLUST-SUM: сумма areaPercent = 110 > 100 (editor: validateAll → V-CLUST-SUM; spaec_manager: exit 2)
+grid:
+  width: 10
+  height: 10
+
+blockedFile: null
+presetFile: null
+
+types:
+  A: { symbol: "A", name: null }
+
+rules:
+  connectivity: 8
+  adjacency:
+    forbidden: []
+    allow: null
+  size:
+    min: null
+    max: null
+  convexity:
+    weight: soft
+  fillAll: false
+  touchAll: false
+
+clusters:
+  - id: c1
+    type: A
+    areaPercent: 70
+    shape: free
+  - id: c2
+    type: A
+    areaPercent: 40
+    shape: free
