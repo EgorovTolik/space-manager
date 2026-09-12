@@ -25,6 +25,12 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: `${req.originalUrl} not found` });
 });
 
+// Демо-удобство (не часть API v1): при EXAMPLES=1 отдаём ../examples,
+// чтобы браузер мог загрузить демонстрационные файлы через fetch.
+if (process.env.EXAMPLES === '1') {
+  app.use('/examples', express.static(path.join(rootDir, '..', 'examples')));
+}
+
 // Статика из dist/ с кэшированием по ТЗ 03 §2:
 // assets с хэшем — immutable год; index.html и прочее — no-cache.
 if (fs.existsSync(distDir)) {
