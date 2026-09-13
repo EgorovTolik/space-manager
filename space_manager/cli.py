@@ -1,4 +1,5 @@
-"""CLI: argparse, ``python -m space_manager place spec.yaml`` (docs/06 §2, §7).
+"""CLI: argparse, ``python -m space_manager place spec.yaml`` (docs/06 §2, §7),
+``python -m space_manager validate <result.txt> --spec <spec.yaml>`` (docs-llm/04).
 
 Публичный API:
 - :func:`main` — точка входа (вызывается из ``__main__.py``); возвращает exit-code.
@@ -33,13 +34,19 @@ import sys
 from datetime import datetime
 from typing import List, Optional
 
-from space_manager.report import EXIT_INPUT_ERROR, build_report, exit_code_for
+from space_manager.report import EXIT_INPUT_ERROR, WARNING_THRESHOLD_PERCENT, build_report, exit_code_for
 from space_manager.spec_io import SpecValidationError, load_spec
 from space_manager.solver import (
     DEFAULT_NODE_BUDGET,
     DEFAULT_SEED,
     DEFAULT_TIME_BUDGET_SECONDS,
     solve,
+)
+from space_manager.validate_map import (
+    EXIT_VALIDATION_FAILED,
+    ResultParseError,
+    parse_result_map,
+    validate as validate_mask,
 )
 
 
@@ -72,6 +79,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--out", metavar="FILE", default=None,
         help=("имя файла для сохранения полного отчёта; по умолчанию "
               "result-<timestamp>.txt в текущем каталоге"),
+    )
+
+    validate = subparsers.add_parser(
+        "validate",
+        help="проверить result-маску по спеке без повторного запуска солвера (docs-llm/04)",
+    )
+    validate.add_argument("result", help="путь к result-файлу (секция «== КАРТА ==»)")
+    validate.add_argument(
+        "--spec", required=True, metavar="FILE",
+        help="YAML-спека, относительно которой проверяется маска (grid, types, rules, кластеры, маски)",
+    )
+    validate.add_argument(
+        "--tolerance", type=float, default=WARNING_THRESHOLD_PERCENT, metavar="PERCENT",
+        help="допуск правила V-AREA, %% от суммы целей (по умолчанию %(default)s)",
     )
     return parser
 
@@ -124,12 +145,55 @@ def _place(args: argparse.Namespace) -> int:
     return exit_code_for(result)
 
 
+def _cmd_validate(args: argparse.Namespace) -> int:
+    """Исполнение подкоманды ``validate``; возвращает exit-code (docs-llm/04 §2).
+
+    - ``0`` — маска валидна («ОК: нарушений нет»);
+    - ``3`` — найдены нарушения: человекочитаемый список в stdout + итог;
+    - ``2`` — ошибка входных данных (result-файл/спека/маски) — сообщение в stderr.
+    """
+    if args.tolerance < 0:
+        return _fail("--tolerance должен быть >= 0 (получено: {})".format(args.tolerance))
+
+    try:
+        spec = load_spec(args.spec)
+    except SpecValidationError as exc:
+        return _fail(str(exc))
+    except (OSError, UnicodeDecodeError) as exc:
+        return _fail("не удалось прочитать файлы входа: {}".format(exc))
+
+    try:
+        with open(args.result, encoding="utf-8") as f:
+            text = f.read()
+    except OSError as exc:
+        return _fail("не удалось прочитать result-файл: {}".format(exc))
+    except UnicodeDecodeError as exc:
+        return _fail("result-файл не является UTF-8 текстом: {}".format(exc))
+
+    try:
+        mask_rows = parse_result_map(text)
+    except ResultParseError as exc:
+        return _fail(str(exc))
+
+    violations = validate_mask(spec, mask_rows, tolerance_percent=args.tolerance)
+    if violations:
+        for violation in violations:
+            print(violation.line())
+        print("ИТОГО нарушений: {}".format(len(violations)))
+        return EXIT_VALIDATION_FAILED
+
+    print("ОК: нарушений нет")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Точка входа CLI; ``argv=None`` → ``sys.argv[1:]``."""
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "place":
         return _place(args)
+    if args.command == "validate":
+        return _cmd_validate(args)
     # Недостижимо (required=True у subparsers), но на всякий случай:
     parser.print_help(sys.stderr)
     return EXIT_INPUT_ERROR
