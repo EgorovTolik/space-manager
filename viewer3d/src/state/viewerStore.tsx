@@ -34,7 +34,9 @@ export const DEFAULT_PARAMS: ViewParams = {
 
 export interface ViewerState {
   report: ParsedReport | null; // null = файл не загружен
-  fileName: string | null; // basename загруженного файла
+  fileName: string | null; // basename загруженного файла (= имя result-файла)
+  projectName: string | null; // проект единого сервиса (docs-unified/04 §2.2) или null
+  resultName: string | null; // выбранная ревизия result-* (= fileName при загрузке)
   params: ViewParams;
   selection: number | null; // index выбранной комнаты (ParsedReport.rooms[i].index) или null
   cameraPreset: CameraPreset; // последний применённый пресет (04 §4.4)
@@ -44,6 +46,8 @@ export interface ViewerState {
 export const initialViewerState: ViewerState = {
   report: null,
   fileName: null,
+  projectName: null,
+  resultName: null,
   params: DEFAULT_PARAMS,
   selection: null,
   cameraPreset: 'iso',
@@ -51,15 +55,23 @@ export const initialViewerState: ViewerState = {
 
 /** Исчерпывающий список действий (ТЗ 01 §2.3, таблица). */
 export type ViewerAction =
-  | { type: 'REPORT_LOADED'; report: ParsedReport; fileName: string }
+  | {
+      type: 'REPORT_LOADED';
+      report: ParsedReport;
+      fileName: string; // имя result-файла (docs-unified/04 §2.2)
+      projectName: string | null; // проект, из которого загружен файл
+      resultName: string | null; // выбранная ревизия (= fileName)
+    }
   | { type: 'PARAMS_SET'; patch: Partial<ViewParams> }
   | { type: 'SELECT_ROOM'; roomId: number | null }
   | { type: 'CAMERA_PRESET'; preset: CameraPreset }
   | { type: 'RESET_PARAMS' };
 
 /**
- * Чистый редьюсер. Правила эффектов — ТЗ 01 §2.3:
- * - REPORT_LOADED: полная замена report/fileName, сброс selection, пресет → «Изометрия»;
+ * Чистый редьюсер. Правила эффектов — ТЗ 01 §2.3 (projectName/resultName —
+ * docs-unified/04 §2.2):
+ * - REPORT_LOADED: полная замена report/fileName/projectName/resultName, сброс
+ *   selection, пресет → «Изометрия»;
  * - PARAMS_SET: точечное обновление params (пересчёт геометрии — в эффекте, не здесь);
  * - SELECT_ROOM: выделение комнаты или снятие (null);
  * - CAMERA_PRESET: фиксация последнего пресета;
@@ -72,6 +84,8 @@ export function viewerReducer(state: ViewerState, action: ViewerAction): ViewerS
       return {
         report: action.report,
         fileName: action.fileName,
+        projectName: action.projectName,
+        resultName: action.resultName,
         params: state.params,
         selection: null,
         cameraPreset: 'iso',

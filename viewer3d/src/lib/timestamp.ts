@@ -17,3 +17,12 @@ export function snapshotTimestamp(d: Date): string {
 export function snapshotFileName(d: Date = new Date()): string {
   return `viewer3d-snapshot-${snapshotTimestamp(d)}.png`;
 }
+
+/**
+ * Имя PNG-предпросмотра проекта (docs-unified/04 §2.4): preview-<YYYYmmdd-HHMMSS>.png.
+ * Формат timestamp тот же; имя задаёт сервер (02 §6.13), клиентское имя — только
+ * для fallback-скачивания и статусов UI.
+ */
+export function previewFileName(d: Date = new Date()): string {
+  return `preview-${snapshotTimestamp(d)}.png`;
+}

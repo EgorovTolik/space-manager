@@ -1,12 +1,14 @@
-// E1 (ТЗ 05 §4): загрузка реального отчёта report_basic.txt — список комнат,
-// типы, клетки, строка статуса, canvas, отсутствие баннеров ошибок.
+// E1 (ТЗ 05 §4, docs-unified/04 §2.3): выбор проекта → свежая ревизия подгружается
+// с API-мока: список комнат, типы, клетки, строка статуса «проект · файл», canvas,
+// отсутствие баннеров ошибок.
 
 import { test, expect } from '@playwright/test';
-import { loadReport, statusLine } from './helpers';
+import { loadProjectReport, statusLine } from './helpers';
 
-test('E1: загрузка report_basic.txt', async ({ page }) => {
-  await page.goto('/');
-  await loadReport(page, 'report_basic.txt');
+const RESULT_NAME = 'result-20260913-000000.txt';
+
+test('E1: выбор проекта → ревизия report_basic', async ({ page }) => {
+  await loadProjectReport(page, 'demo', [{ name: RESULT_NAME, fixture: 'report_basic.txt' }]);
 
   // В списке комнат ровно 3 строки.
   const rows = page.locator('.rooms-table tbody tr');
@@ -30,9 +32,13 @@ test('E1: загрузка report_basic.txt', async ({ page }) => {
   );
   expect(actual).toEqual(expected);
 
-  // Строка статуса: «50×50 клеток … комнат: 3 …».
+  // Строка статуса: префикс проект/файл (docs-unified/04 §2.2) + «50×50 … комнат: 3».
+  await expect(statusLine(page)).toContainText(`проект: demo · файл: ${RESULT_NAME}`);
   await expect(statusLine(page)).toContainText('50×50');
   await expect(statusLine(page)).toContainText('комнат: 3');
+
+  // Статус панели «Проект»: имя файла (docs-unified/04 §2.3).
+  await expect(page.locator('.panel-files .file-status')).toContainText(RESULT_NAME);
 
   // Canvas сцены существует.
   await expect(page.locator('main canvas').first()).toBeVisible();

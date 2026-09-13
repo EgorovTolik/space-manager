@@ -3,7 +3,7 @@
 // меняется «Сверху» → «Изометрия».
 
 import { test, expect } from '@playwright/test';
-import { loadReport } from './helpers';
+import { loadProjectReport } from './helpers';
 
 /** Консольные сообщения WebGL/ANGLE/SwiftShader — штатный шум headless-рендера. */
 const HARMLESS_CONSOLE = /WebGL|ANGLE|swiftshader|SwiftShader|three|THREE|drei|GPU|gl_loseContext|Vulkan/i;
@@ -18,8 +18,10 @@ test('E6: горячие клавиши 2 → 1', async ({ page }) => {
     }
   });
 
-  await page.goto('/');
-  await loadReport(page, 'report_basic.txt');
+  // Проектный режим (docs-unified/04 §2): отчёт подгружается из mock API.
+  await loadProjectReport(page, 'demo', [
+    { name: 'result-20260913-000000.txt', fixture: 'report_basic.txt' },
+  ]);
 
   const topBtn = page.getByRole('button', { name: 'Сверху', exact: true });
   const isoBtn = page.getByRole('button', { name: 'Изометрия', exact: true });

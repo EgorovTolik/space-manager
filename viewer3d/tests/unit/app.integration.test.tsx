@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-// Интеграция state ↔ компоненты (ТЗ 05 §2/§4): монтируем App с фикстурным отчётом,
-// загружаем файл через FilePanel, проверяем список комнат, карточку выбранной
-// комнаты и горячую клавишу Esc. R3F-сцена замещена mock'ом (WebGL в jsdom нет —
-// тесты сцены идут e2e, подзадача 6).
+// Интеграция state ↔ компоненты в проектном режиме (docs-unified/04 §2): монтируем
+// App, API единого сервиса мокнем через fetch-заглушку (GET /api/projects, …/results,
+// …/file), проверяем: автовыбор проекта/ревизии, список комнат, карточку выбранной
+// комнаты, Esc, переключение ревизий, битый результат → баннер. R3F-сцена замещена
+// mock'ом (WebGL в jsdom нет — тесты сцены идут e2e).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
@@ -17,17 +18,96 @@ vi.mock('../../src/scene/Scene', () => ({
 
 // eslint-disable-next-line react-refresh/only-export-components
 // vitest + jsdom: import.meta.url не file:// — путь считаем от cwd (корень viewer3d).
-const FIXTURE = fs.readFileSync(
+const GOOD_REPORT = fs.readFileSync(
   path.join(process.cwd(), 'tests', 'fixtures', 'report_basic.txt'),
   'utf-8',
 );
+const BAD_REPORT = 'просто текст без секций';
+
+const PROJECT = 'demo';
+const NEW_RESULT = 'result-20260913-000000.txt';
+const OLD_RESULT = 'result-20260901-000000.txt';
+
+// ── Мок fetch (docs-unified/02 §6: projects / results / file) ────────────────────
+
+function okJson(body: unknown): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response;
+}
+
+function okText(text: string): Response {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => {
+      throw new Error('не JSON');
+    },
+    text: async () => text,
+  } as unknown as Response;
+}
+
+function notFound(): Response {
+  return {
+    ok: false,
+    status: 404,
+    json: async () => ({ error: 'FILE_NOT_FOUND', message: 'Файл не найден' }),
+    text: async () => '',
+  } as unknown as Response;
+}
+
+function installApiMock(): void {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input);
+    if (url === '/api/projects') {
+      return okJson({
+        projects: [
+          {
+            id: 'id-demo',
+            name: PROJECT,
+            createdAt: '2026-09-13T12:00:00.000Z',
+            updatedAt: '2026-09-13T12:00:00.000Z',
+            latestResult: NEW_RESULT,
+            sizeBytes: 123,
+            resultsCount: 2,
+            previewsCount: 0,
+            filesCount: 3,
+          },
+        ],
+      });
+    }
+    if (url === `/api/projects/${PROJECT}/results`) {
+      // имя desc — свежая первая (docs-unified/02 §6.11)
+      return okJson({
+        results: [
+          { name: NEW_RESULT, sizeBytes: GOOD_REPORT.length, mtimeIso: '2026-09-13T12:00:00.000Z' },
+          { name: OLD_RESULT, sizeBytes: BAD_REPORT.length, mtimeIso: '2026-09-01T12:00:00.000Z' },
+        ],
+      });
+    }
+    const fileMatch = /\/api\/projects\/([^/]+)\/file\?name=([^&]+)/.exec(url);
+    if (fileMatch !== null) {
+      if (fileMatch[1] === PROJECT && fileMatch[2] === NEW_RESULT) return okText(GOOD_REPORT);
+      if (fileMatch[1] === PROJECT && fileMatch[2] === OLD_RESULT) return okText(BAD_REPORT);
+    }
+    return notFound();
+  });
+  vi.stubGlobal('fetch', fetchMock);
+}
 
 beforeEach(() => {
   (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+  installApiMock();
+  window.history.pushState(null, '', '/viewer3d/');
 });
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
+  window.history.pushState(null, '', '/viewer3d/');
 });
 
 function renderApp() {
@@ -38,39 +118,52 @@ function renderApp() {
   );
 }
 
-/** «Загрузка» файла через input[type=file] (jsdom: FileReader работает), без ожидания. */
-function feedFile(container: HTMLElement, name: string, text: string): void {
-  const maybeInput = container.querySelector('input[type="file"]') as HTMLInputElement | null;
-  expect(maybeInput, 'в FilePanel должен быть input[type=file]').not.toBeNull();
-  if (maybeInput === null) throw new Error('input[type=file] не найден'); // сужение типа
-  const input = maybeInput;
-  const file = new File([text], name, { type: 'text/plain' });
-  Object.defineProperty(input, 'files', { value: [file] });
-  fireEvent.change(input);
+/** Дождаться списка проектов и выбрать проект в селекторе (docs-unified/04 §2.3). */
+async function selectProject(): Promise<void> {
+  const select = screen.getByRole('combobox', { name: 'Проект' });
+  await waitFor(() => expect((select as HTMLSelectElement).disabled).toBe(false), { timeout: 5000 });
+  fireEvent.change(select, { target: { value: PROJECT } });
 }
 
-async function loadReportFile(container: HTMLElement): Promise<void> {
-  feedFile(container, 'result-test.txt', FIXTURE);
-  // FileReader асинхронный — ждём появления списка комнат
+/** Дождаться загрузки ревизии (список комнат появился). */
+async function waitLoaded(): Promise<void> {
   await waitFor(() => expect(screen.getByText('room1')).toBeTruthy(), { timeout: 5000 });
 }
 
-describe('App + store + панели (без WebGL)', () => {
-  it('до загрузки: заглушка сцены, панели неактивны', () => {
+describe('App + ProjectPanel + store (проектный режим, без WebGL)', () => {
+  it('до выбора проекта: заглушка сцены, селекторы, «← К проектам»', async () => {
     renderApp();
-    expect(screen.getByText(/Загрузите файл отчёта/)).toBeTruthy();
+    expect(screen.getByText(/Выберите проект и файл результата/)).toBeTruthy();
+    const toProjects = screen.getByRole('link', { name: '← К проектам' }) as HTMLAnchorElement;
+    expect(toProjects.getAttribute('href')).toBe('/');
     // кнопка пресетов тулбара заблокирована до загрузки отчёта
     const iso = screen.getByRole('button', { name: 'Изометрия' }) as HTMLButtonElement;
     expect(iso.disabled).toBe(true);
+    // список проектов подгружен с API
+    await waitFor(() =>
+      expect(screen.getByRole('option', { name: PROJECT })).toBeTruthy(),
+    );
   });
 
-  it('загрузка реального отчёта → список комнат, статус сетки, легенда', async () => {
-    const { container } = renderApp();
-    await loadReportFile(container);
+  it('выбор проекта → автовыбор свежей ревизии, список комнат, статус «проект · файл»', async () => {
+    renderApp();
+    await selectProject();
+    await waitLoaded();
 
-    // строка статуса (ТЗ 04 §4.5): 50×50, 3 комнаты, число боксов стен > 0
-    const status = screen.getByText(/50×50 клеток · S = 1 м\/клетку · комнат: 3 · стен: \d+ боксов/);
-    expect(status).toBeTruthy();
+    // строка статуса сцены: префикс проект/файл + 50×50, 3 комнаты, боксы > 0
+    expect(
+      screen.getByText(
+        new RegExp(`проект: ${PROJECT} · файл: ${NEW_RESULT} · 50×50 клеток · S = 1 м/клетку · комнат: 3 · стен: \\d+ боксов`),
+        { selector: '.status-line' },
+      ),
+    ).toBeTruthy();
+
+    // статус панели «Проект»: «проект: p · файл: f» (docs-unified/04 §2.3)
+    expect(
+      screen.getByText(new RegExp(`проект: ${PROJECT} · файл: ${NEW_RESULT}`), {
+        selector: '.panel-files li',
+      }),
+    ).toBeTruthy();
 
     // список комнат (ТЗ 04 §5): все три метки + площади в м² (S=1)
     expect(screen.getByText('room2')).toBeTruthy();
@@ -83,16 +176,49 @@ describe('App + store + панели (без WebGL)', () => {
     expect(screen.getByText('ROOM1', { selector: '.legend-row span' })).toBeTruthy();
   });
 
+  it('переключение ревизии на битый файл → баннер разбора, прежняя сцена не меняется (docs-unified/04 §2.3)', async () => {
+    renderApp();
+    await selectProject();
+    await waitLoaded();
+
+    const revSelect = screen.getByRole('combobox', { name: 'Файл результата (ревизия)' });
+    fireEvent.change(revSelect, { target: { value: OLD_RESULT } });
+
+    // баннер ошибки разбора; состояние отчёта — прежняя (корректная) ревизия
+    await waitFor(() => expect(screen.getByText(/Ошибка разбора отчёта/)).toBeTruthy(), { timeout: 5000 });
+    expect(screen.getByText('room1')).toBeTruthy();
+    // строка статуса сцены по-прежнему на свежей (корректной) ревизии
+    expect(
+      screen.getByText(new RegExp(`файл: ${NEW_RESULT} · 50×50 клеток`), { selector: '.status-line' }),
+    ).toBeTruthy();
+  });
+
+  it('URL ?project=&result= с битой ревизией → баннер, сцена не строится (docs-unified/04 §2.5)', async () => {
+    window.history.pushState(null, '', `/viewer3d/?project=${PROJECT}&result=${OLD_RESULT}`);
+    renderApp();
+
+    await waitFor(() => expect(screen.getByText(/Ошибка разбора отчёта/)).toBeTruthy(), { timeout: 5000 });
+    // заглушка сцены — состояние не изменилось (отчёт не загружен)
+    expect(screen.getByText(/Выберите проект и файл результата/)).toBeTruthy();
+  });
+
+  it('URL ?project= → проект подгружается автоматически', async () => {
+    window.history.pushState(null, '', `/viewer3d/?project=${PROJECT}`);
+    renderApp();
+    await waitLoaded();
+    expect(screen.getByText('room1')).toBeTruthy();
+  });
+
   it('клик по строке → карточка выбранной комнаты; повторный клик — снять выделение', async () => {
-    const { container } = renderApp();
-    await loadReportFile(container);
+    renderApp();
+    await selectProject();
+    await waitLoaded();
 
     expect(screen.getByText('комната не выбрана')).toBeTruthy();
 
     // клик по строке room1
     fireEvent.click(screen.getByText('room1'));
     await waitFor(() => {
-      // карточка: метка + символ/тип + клетки + габариты bbox
       const info = screen.getAllByText('room1');
       expect(info.length).toBeGreaterThanOrEqual(2); // строка списка + заголовок карточки
     });
@@ -106,8 +232,9 @@ describe('App + store + панели (без WebGL)', () => {
   });
 
   it('Esc снимает выделение (ТЗ 04 §12)', async () => {
-    const { container } = renderApp();
-    await loadReportFile(container);
+    renderApp();
+    await selectProject();
+    await waitLoaded();
     fireEvent.click(screen.getByText('corridor1'));
     await waitFor(() => expect(screen.getByText(/символ C · тип CORRIDOR/)).toBeTruthy());
 
@@ -115,18 +242,13 @@ describe('App + store + панели (без WebGL)', () => {
     await waitFor(() => expect(screen.getByText('комната не выбрана')).toBeTruthy());
   });
 
-  it('битый файл → баннер ошибки разбора, сцена не строится', async () => {
-    const { container } = renderApp();
-    feedFile(container, 'bad.txt', 'просто текст без секций');
-    await waitFor(() => expect(screen.getByText(/Ошибка разбора отчёта/)).toBeTruthy(), { timeout: 5000 });
-    // заглушка сцены остаётся — состояние не изменилось
-    expect(screen.getByText(/Загрузите файл отчёта/)).toBeTruthy();
-  });
-
   it('PNG-кнопка активна только после загрузки отчёта', async () => {
-    const { container } = renderApp();
-    expect((screen.getByRole('button', { name: 'PNG' }) as HTMLButtonElement).disabled).toBe(true);
-    await loadReportFile(container);
+    renderApp();
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'PNG' }) as HTMLButtonElement).disabled).toBe(true),
+    );
+    await selectProject();
+    await waitLoaded();
     expect((screen.getByRole('button', { name: 'PNG' }) as HTMLButtonElement).disabled).toBe(false);
   });
 });

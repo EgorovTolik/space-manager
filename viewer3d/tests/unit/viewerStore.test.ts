@@ -40,32 +40,50 @@ const loadedState: ViewerState = {
   ...initialViewerState,
   report: fakeReport,
   fileName: 'result-20260913-000000.txt',
+  projectName: 'demo',
+  resultName: 'result-20260913-000000.txt',
   selection: 1,
   cameraPreset: 'top',
 };
 
 describe('viewerReducer', () => {
-  it('initialViewerState: отчёт не загружен, параметры — дефолты, пресет iso', () => {
+  it('initialViewerState: отчёт не загружен, проект/ревизия — null, параметры — дефолты, пресет iso', () => {
     expect(initialViewerState.report).toBeNull();
     expect(initialViewerState.fileName).toBeNull();
+    expect(initialViewerState.projectName).toBeNull(); // docs-unified/04 §2.2
+    expect(initialViewerState.resultName).toBeNull();
     expect(initialViewerState.params).toEqual(DEFAULT_PARAMS);
     expect(initialViewerState.selection).toBeNull();
     expect(initialViewerState.cameraPreset).toBe('iso');
   });
 
-  it('REPORT_LOADED: полная замена report/fileName, сброс selection, пресет → iso', () => {
+  it('REPORT_LOADED: полная замена report/fileName/projectName/resultName, сброс selection, пресет → iso', () => {
     const next = viewerReducer(loadedState, {
       type: 'REPORT_LOADED',
       report: fakeReport,
       fileName: 'result-new.txt',
+      projectName: 'other',
+      resultName: 'result-new.txt',
     });
     expect(next.report).toBe(fakeReport);
     expect(next.fileName).toBe('result-new.txt');
+    expect(next.projectName).toBe('other'); // docs-unified/04 §2.2
+    expect(next.resultName).toBe('result-new.txt');
     expect(next.selection).toBeNull();
     expect(next.cameraPreset).toBe('iso');
-    // params не затрагиваются загрузкой
+  });
+
+  it('REPORT_LOADED: params не затрагиваются загрузкой; null-проект допустим', () => {
     const withCustom: ViewerState = { ...loadedState, params: { ...DEFAULT_PARAMS, scale: 2 } };
-    expect(viewerReducer(withCustom, { type: 'REPORT_LOADED', report: fakeReport, fileName: 'x' }).params.scale).toBe(2);
+    const next = viewerReducer(withCustom, {
+      type: 'REPORT_LOADED',
+      report: fakeReport,
+      fileName: 'x',
+      projectName: null,
+      resultName: null,
+    });
+    expect(next.params.scale).toBe(2);
+    expect(next.projectName).toBeNull();
   });
 
   it('PARAMS_SET: точечное обновление params, остальное не трогает', () => {

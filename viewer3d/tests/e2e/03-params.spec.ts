@@ -1,13 +1,15 @@
 // E3 (ТЗ 05 §4): смена параметров (толщина → 0.5, масштаб → 2) — после debounce
 // нет ошибок в UI, список комнат не изменился, число боксов стен в строке статуса
 // не изменилось (от T/S зависит размер боксов, не их количество — ТЗ 03 §6).
+// Проектный режим (docs-unified/04 §2.3): отчёт подгружается из mock API.
 
 import { test, expect } from '@playwright/test';
-import { loadReport, statusLine, wallBoxesCount } from './helpers';
+import { loadProjectReport, statusLine, wallBoxesCount } from './helpers';
 
 test('E3: смена толщины и масштаба', async ({ page }) => {
-  await page.goto('/');
-  await loadReport(page, 'report_basic.txt');
+  await loadProjectReport(page, 'demo', [
+    { name: 'result-20260913-000000.txt', fixture: 'report_basic.txt' },
+  ]);
 
   const rows = page.locator('.rooms-table tbody tr');
   const before = await rows.evaluateAll((trs) =>

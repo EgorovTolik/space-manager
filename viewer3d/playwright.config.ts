@@ -13,8 +13,10 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   reporter: [['list']],
+  // docs-unified/04 §2.6: viewer3d живёт под /viewer3d/ (vite base) — e2e идёт
+  // против реального монтирования, а не корня.
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: `http://localhost:${PORT}/viewer3d/`,
     viewport: { width: 1440, height: 900 },
     trace: 'retain-on-failure',
   },

@@ -1,35 +1,59 @@
-// E5 (ТЗ 05 §4): загрузка файла с текстом «hello world» — баннер ошибки V-NO-MAP,
-// правые панели неактивны, сцена пуста (плейсхолдер, нет подписей/объектов комнат).
+// E5 (docs-unified/04 §2.3): ошибки загрузки — баннер, состояние не меняется:
+// а) битый текст ревизии → баннер «Ошибка разбора отчёта» с кодом;
+// б) ошибка API (HTTP 500 на file) → баннер с сообщением из JSON; сцена прежняя.
 
 import { test, expect } from '@playwright/test';
-import * as path from 'node:path';
-import * as fs from 'node:fs';
-import { E2E_DIR, reportFileInput } from './helpers';
+import { mockViewerApi, selectProject, statusLine } from './helpers';
 
-test('E5: невалидный файл → V-NO-MAP', async ({ page }) => {
-  // Файл с мусорным содержимым (не отчёт).
-  const garbage = path.join(E2E_DIR, 'garbage.txt');
-  fs.writeFileSync(garbage, 'hello world\n', 'utf8');
+const GOOD = 'result-20260913-000000.txt';
+const BAD = 'result-20260901-000000.txt';
+
+test('E5a: битая ревизия — баннер разбора, прежняя сцена не теряется', async ({ page }) => {
+  await mockViewerApi(page, 'demo', [
+    { name: GOOD, fixture: 'report_basic.txt' },
+    { name: BAD, text: 'просто текст без секций' },
+  ]);
+  await page.goto('/');
+  await selectProject(page, 'demo');
+
+  // Свежая (корректная) ревизия загружена.
+  await expect(statusLine(page)).toContainText(`файл: ${GOOD}`);
+
+  // Переключаемся на битую ревизию → баннер ошибки разбора.
+  const revSelect = page.getByRole('combobox', { name: 'Файл результата (ревизия)' });
+  await revSelect.selectOption(BAD);
+  await expect(page.locator('.file-error')).toContainText('Ошибка разбора отчёта');
+
+  // Сцена НЕ сброшена — прежняя корректная ревизия на месте (§2.3: состояние не сбрасывается).
+  await expect(statusLine(page)).toContainText(`файл: ${GOOD}`);
+  await expect(page.locator('.rooms-table tbody tr')).toHaveCount(3);
+});
+
+test('E5b: ошибка API при чтении файла — баннер с сообщением, состояние не сбрасывается', async ({ page }) => {
+  // Мок: список содержит GOOD и ERR, но файл ERR отдаётся с HTTP 500.
+  await mockViewerApi(page, 'demo', [
+    { name: GOOD, fixture: 'report_basic.txt' },
+    { name: BAD, text: 'заменено ошибкой' },
+  ]);
+  // Догружаем перехват ошибки ТОЛЬКО для файла ERR (поздний route = больший приоритет).
+  await page.route(/\/api\/projects\/demo\/file\?name=result-20260901-000000\.txt$/, (route) => {
+    return route.fulfill({
+      status: 500,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ error: 'INTERNAL', message: 'Внутренняя ошибка сервера' }),
+    });
+  });
 
   await page.goto('/');
-  await reportFileInput(page).setInputFiles(garbage);
+  await selectProject(page, 'demo');
+  await expect(statusLine(page)).toContainText(`файл: ${GOOD}`);
 
-  // Баннер ошибки парсинга с кодом V-NO-MAP и текстом «не найдена секция».
-  const error = page.locator('.file-error');
-  await expect(error).toBeVisible();
-  await expect(error).toContainText('V-NO-MAP');
-  await expect(error).toContainText('не найдена секция');
+  const revSelect = page.getByRole('combobox', { name: 'Файл результата (ревизия)' });
+  await revSelect.selectOption(BAD);
 
-  // Состояние не изменилось: отчёт не загружен.
-  await expect(page.locator('.panel-files')).toContainText('файл не загружен');
+  // Баннер с сообщением из JSON-ошибки API.
+  await expect(page.locator('.file-error')).toContainText('Внутренняя ошибка сервера');
 
-  // Правые панели неактивны (подсказка «Сначала загрузите отчёт»).
-  await expect(page.locator('.panel-rooms')).toContainText('Сначала загрузите отчёт');
-  await expect(page.locator('.panel-info')).toContainText('комната не выбрана');
-
-  // Сцена пуста: плейсхолдер виден, объектов комнат в DOM нет.
-  await expect(page.locator('.scene-placeholder')).toBeVisible();
-  await expect(page.locator('.room-label')).toHaveCount(0);
-
-  fs.rmSync(garbage, { force: true });
+  // Прежняя сцена не потеряна.
+  await expect(statusLine(page)).toContainText(`файл: ${GOOD}`);
 });

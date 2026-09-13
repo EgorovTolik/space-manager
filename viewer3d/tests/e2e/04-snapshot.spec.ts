@@ -1,31 +1,52 @@
-// E4 (ТЗ 05 §4): кнопка PNG-снапшота — событие download, имя
-// viewer3d-snapshot-<YYYYmmdd-HHMMSS>.png, файл непустой (валидный PNG).
+// E4 (docs-unified/04 §2.4): PNG — НЕ скачивание на диск, а POST в preview/ проекта:
+// перехватываем …/preview (page.route), проверяем тело запроса (PNG magic + размер),
+// и статус-строку «Предпросмотр сохранён в проект: preview-<ts>.png» (5 с).
 
 import { test, expect } from '@playwright/test';
-import * as fs from 'node:fs';
-import { loadReport } from './helpers';
+import { loadProjectReport } from './helpers';
 
-test('E4: PNG-снапшот', async ({ page }) => {
-  await page.goto('/');
-  await loadReport(page, 'report_basic.txt');
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47]); // \x89PNG
 
-  // Дождаться, пока сцена отрисовала хотя бы один кадр (подписи комнат рендерятся
-  // в том же проходе): toBlob по canvas без отрисованного кадра вернёт null —
-  // детерминированный сигнал «кадр есть» вместо таймера.
-  await expect(page.locator('.room-label').first()).toBeVisible();
-
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    page.getByRole('button', { name: 'PNG', exact: true }).click(),
+test('E4: PNG → POST …/preview (тело — валидный PNG), статус «Предпросмотр сохранён»', async ({ page }) => {
+  const captured = await loadProjectReport(page, 'demo', [
+    { name: 'result-20260913-000000.txt', fixture: 'report_basic.txt' },
   ]);
 
-  // Имя по формату ТЗ 04 §10.
-  expect(download.suggestedFilename()).toMatch(/^viewer3d-snapshot-\d{8}-\d{6}\.png$/);
+  // Скачиваний на диск быть НЕ должно (в проектном режиме fallback не используется).
+  const downloads = new Set<string>();
+  page.on('download', (d) => downloads.add(d.suggestedFilename()));
 
-  // Файл непустой и это PNG (магические байты).
-  const filePath = await download.path();
-  if (filePath === undefined) throw new Error('download без локального файла');
-  const buf = fs.readFileSync(filePath);
-  expect(buf.length).toBeGreaterThan(100);
-  expect(Array.from(buf.subarray(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  await page.getByRole('button', { name: 'PNG' }).click();
+
+  // POST preview выполнен ровно один раз, проект верный.
+  await expect.poll(() => captured.previews.length).toBe(1);
+  expect(captured.previews[0].project).toBe('demo');
+
+  // Тело — валидный PNG (magic) с реальными размерами кадра.
+  const body = captured.previews[0].body;
+  expect(body.subarray(0, 4).equals(PNG_MAGIC)).toBe(true);
+  expect(body.length).toBeGreaterThan(1024);
+
+  // Статус в панели: «Предпросмотр сохранён в проект: preview-<ts>.png» (§2.4).
+  const status = page.locator('.panel-files', { hasText: 'Предпросмотр сохранён в проект' }).first();
+  await expect(status).toContainText('preview-20260913-000000.png');
+
+  // …и исчезает через ~5 с («строка статуса на 5 секунд»).
+  await expect(status).toHaveCount(0, { timeout: 8000 });
+
+  // На диск ничего не скачалось.
+  expect(downloads.size).toBe(0);
+});
+
+test('E4b: повторный PNG — новый POST (каждая кнопка = один предпросмотр)', async ({ page }) => {
+  const captured = await loadProjectReport(page, 'demo', [
+    { name: 'result-20260913-000000.txt', fixture: 'report_basic.txt' },
+  ]);
+
+  await page.getByRole('button', { name: 'PNG' }).click();
+  await expect.poll(() => captured.previews.length).toBe(1);
+
+  // Снимаем повторно — второй POST.
+  await page.getByRole('button', { name: 'PNG' }).click();
+  await expect.poll(() => captured.previews.length).toBe(2);
 });

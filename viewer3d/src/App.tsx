@@ -1,11 +1,11 @@
 // Layout приложения (ТЗ 04 §1): трёхколоночная раскладка.
-//   левая  — FilePanel + ParamsPanel
+//   левая  — ProjectPanel + ParamsPanel
 //   центр  — Toolbar + WarningsBanner + 3D-сцена + строка статуса
 //   правая — RoomsPanel + InfoPanel + Legend
 // Плюс: горячие клавиши (ТЗ 04 §12) и общий пересчёт боксов стен (debounce 200 мс).
 
 import { useEffect } from 'react';
-import { FilePanel } from './components/FilePanel';
+import { ProjectPanel } from './components/ProjectPanel';
 import { ParamsPanel } from './components/ParamsPanel';
 import { RoomsPanel } from './components/RoomsPanel';
 import { InfoPanel } from './components/InfoPanel';
@@ -48,7 +48,7 @@ function useHotkeys(): void {
 function StatusLine({ wallBoxesCount }: { wallBoxesCount: number }) {
   const { state } = useViewer();
   if (state.report === null) return null;
-  // Строка статуса по ТЗ 04 §4.5
+  // Строка статуса по ТЗ 04 §4.5 + docs-unified/04 §2.2 (префикс «проект · файл»)
   return (
     <div className="status-line">
       {ru.statusLine(
@@ -58,6 +58,8 @@ function StatusLine({ wallBoxesCount }: { wallBoxesCount: number }) {
         state.params.unitLabel,
         state.report.rooms.length,
         wallBoxesCount,
+        state.projectName,
+        state.resultName,
       )}
     </div>
   );
@@ -74,10 +76,14 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1>{ru.appTitle}</h1>
+        {/* docs-unified/04 §2.2: заголовок — ссылка «← К проектам» (менеджер, /) */}
+        <a href="/" className="to-projects">
+          {ru.toProjects}
+        </a>
       </header>
       <div className="app-body">
         <aside className="col-left">
-          <FilePanel />
+          <ProjectPanel />
           <ParamsPanel />
         </aside>
         <main className="col-center">

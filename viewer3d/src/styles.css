@@ -32,6 +32,19 @@ body {
   border-bottom: 1px solid #ddd;
 }
 
+/* docs-unified/04 §2.2: ссылка «← К проектам» в заголовке (менеджер, /) */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.to-projects {
+  font-size: 13px;
+  margin-left: auto;
+  margin-right: 12px;
+}
+
 .app-body {
   flex: 1;
   display: grid;

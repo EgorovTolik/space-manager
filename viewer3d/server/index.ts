@@ -40,6 +40,8 @@ if (fs.existsSync(distDir)) {
       },
     }),
   );
+  // Двойной mount (docs-unified/01 §3.4): base '/viewer3d/' — работает и '/', и '/viewer3d/*'.
+  app.use('/viewer3d', express.static(distDir));
 }
 
 // SPA-fallback (ТЗ 01 §2.6): GET-путь без расширения, не /api/* и не существующая

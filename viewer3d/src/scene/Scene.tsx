@@ -13,7 +13,8 @@ import { symbolPalette, UNKNOWN_SYMBOL_COLOR } from '../lib/palette';
 import type { WallBox } from '../lib/walls';
 import { presetCamera, roomFocus, type V3 } from './cameraMath';
 import { buildRoomFloorGeometry } from './roomFloor';
-import { setSnapshotHandler } from './snapshot';
+import { getSnapshotTarget, setSnapshotHandler } from './snapshot';
+import { savePreview } from '../lib/api';
 import { snapshotFileName } from '../lib/timestamp';
 
 // Константы сцены (ТЗ 03 §1/§9)
@@ -401,22 +402,39 @@ function RoomLabels({
 }
 
 // ---------------------------------------------------------------------------
-// PNG-снапшот (ТЗ 04 §10): gl.domElement.toBlob → Blob → <a download>
+// PNG-снапшот (ТЗ 04 §10 + docs-unified/04 §2.4): gl.domElement.toBlob → Blob.
+// Проектный режим: цель задана (ProjectPanel при загрузке ревизии) → POST
+// /api/projects/<p>/preview, имя файла назначает сервер. Ошибка POST — результат
+// {error} (баннер панели). Без цели (только dev) — fallback на локальное
+// скачивание snapshotFileName(), как в standalone.
 // ---------------------------------------------------------------------------
 
 function SnapshotBinder() {
   const gl = useThree((s) => s.gl);
   useEffect(() => {
-    setSnapshotHandler(() => {
-      gl.domElement.toBlob((blob) => {
-        if (blob === null) return;
-        const url = URL.createObjectURL(blob);
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = snapshotFileName();
-        anchor.click();
-        URL.revokeObjectURL(url);
-      }, 'image/png');
+    setSnapshotHandler(async () => {
+      const blob = await new Promise<Blob | null>((resolve) =>
+        gl.domElement.toBlob(resolve, 'image/png'),
+      );
+      if (blob === null) return null; // нет отрисованного кадра — результат не формируется
+      const t = getSnapshotTarget();
+      if (t !== null) {
+        try {
+          const saved = await savePreview(t.projectName, blob);
+          return { savedToProject: saved.file };
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
+      // Fallback: локальное скачивание (docs-unified/04 §2.4).
+      const name = snapshotFileName();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = name;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      return { downloaded: name };
     });
     return () => setSnapshotHandler(null);
   }, [gl]);
