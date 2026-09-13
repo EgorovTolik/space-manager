@@ -66,8 +66,21 @@ interface Call {
   body?: string;
 }
 
-/** Мок fetch над /api (docs-unified/02): projects/file/files/generate. */
-function mockFetch(files: Record<string, string>): Call[] {
+interface MockOpts {
+  /** Человекочитаемое имя проекта (по умолчанию PROJECT). */
+  projectName?: string;
+  /** Slug проекта в URL/API (по умолчанию PROJECT — совпадает с именем). */
+  projectSlug?: string;
+  /** Начальная история result-* (`GET …/results`); после генерации новая
+   *  ревизия добавляется наверх (замечание 4). */
+  results?: { name: string; mtimeIso: string }[];
+}
+
+/** Мок fetch над /api (docs-unified/02): projects/file/files/generate/results. */
+function mockFetch(files: Record<string, string>, opts: MockOpts = {}): Call[] {
+  const projectName = opts.projectName ?? PROJECT;
+  const projectSlug = opts.projectSlug ?? PROJECT;
+  let resultsList: { name: string; mtimeIso: string }[] = [...(opts.results ?? [])];
   const calls: Call[] = [];
   const handler = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -82,7 +95,8 @@ function mockFetch(files: Record<string, string>): Call[] {
         projects: [
           {
             id: 'id-1',
-            name: PROJECT,
+            name: projectName,
+            slug: projectSlug,
             createdAt: '2026-09-13T12:00:00.000Z',
             updatedAt: '2026-09-13T12:00:00.000Z',
             latestResult: null,
@@ -93,6 +107,8 @@ function mockFetch(files: Record<string, string>): Call[] {
           },
         ],
       });
+    } else if (url === `/api/projects/${encodeURIComponent(projectSlug)}/results`) {
+      bodyText = JSON.stringify({ results: resultsList });
     } else if (/\/file\?name=/.test(url)) {
       const name = new URL(url, 'http://localhost').searchParams.get('name');
       if (name !== null && files[name] !== undefined) {
@@ -111,6 +127,11 @@ function mockFetch(files: Record<string, string>): Call[] {
         ),
       });
     } else if (url.endsWith('/generate') && method === 'POST') {
+      // Успешная генерация → новая ревизия наверху истории (замечание 4).
+      resultsList = [
+        { name: 'result-20260913-120000.txt', mtimeIso: '2026-09-13T12:05:00.000Z' },
+        ...resultsList.filter((r) => r.name !== 'result-20260913-120000.txt'),
+      ];
       bodyText = JSON.stringify({
         resultFile: 'result-20260913-120000.txt',
         exitCode: 0,
@@ -241,5 +262,89 @@ describe('ProjectFilesPanel: генерация (docs-unified/04 §1.6)', () => 
     mockFetch({ 'spec.yaml': SPEC_WITH_NONCANON_MASK, 'blocked_basic.txt': BLOCKED_10 });
     renderPanel('/?project=nope');
     await screen.findByText(/Проект «nope» не найден/);
+  });
+});
+
+describe('ProjectFilesPanel: «Отчёты генераций» (замечание 4)', () => {
+  it('пустой список → «Результатов пока нет»', async () => {
+    mockFetch(
+      { 'spec.yaml': SPEC_WITH_NONCANON_MASK, 'blocked_basic.txt': BLOCKED_10 },
+      { results: [] },
+    );
+    renderPanel();
+    await selectProject(PROJECT);
+    await screen.findByText('Результатов пока нет', {}, { timeout: 5000 });
+  });
+
+  it('имя+дата, «В 3D» со slug в href, «Открыть отчёт» раскрывает текст (name ≠ slug)', async () => {
+    const calls = mockFetch(
+      {
+        'spec.yaml': SPEC_WITH_NONCANON_MASK,
+        'blocked_basic.txt': BLOCKED_10,
+        'result-20260913-110000.txt': REPORT_OK,
+      },
+      {
+        projectName: 'Демо офис',
+        projectSlug: 'demo-office',
+        results: [{ name: 'result-20260913-110000.txt', mtimeIso: '2026-09-13T11:00:00.000Z' }],
+      },
+    );
+    renderPanel();
+
+    // Селектор показывает человекочитаемое имя, value — slug.
+    const select = screen.getByRole('combobox', { name: 'Проект' }) as HTMLSelectElement;
+    await waitFor(() => expect(select.disabled).toBe(false));
+    expect(Array.from(select.options).some((o) => o.textContent === 'Демо офис')).toBe(true);
+    fireEvent.change(select, { target: { value: 'demo-office' } });
+
+    // Статус строки — человекочитаемое имя; запросы идут по SLUG.
+    await screen.findByText(/проект: Демо офис/);
+    expect(calls.some((c) => c.url === '/api/projects/demo-office/results')).toBe(true);
+    expect(calls.some((c) => c.url.includes('/api/projects/%D0%94'))).toBe(false); // name в URL не идёт
+
+    // Строка ревизии: имя + дата; «В 3D» — slug + файл.
+    await screen.findByText(/result-20260913-110000\.txt ·/, {}, { timeout: 5000 });
+    const link = screen.getByRole('link', { name: 'В 3D' });
+    expect(link.getAttribute('href')).toBe(
+      '/viewer3d?project=demo-office&result=result-20260913-110000.txt',
+    );
+
+    // «Открыть отчёт» → inline-раскрытие полного текста (GET …/file?name=…).
+    fireEvent.click(screen.getByRole('button', { name: 'Открыть отчёт' }));
+    await screen.findByText(/== ТАБЛИЦА/, {}, { timeout: 5000 });
+    expect(calls.some((c) => c.url.endsWith('/file?name=result-20260913-110000.txt'))).toBe(true);
+
+    // Повторный клик — сворачивание.
+    fireEvent.click(screen.getByRole('button', { name: 'Свернуть отчёт' }));
+    await waitFor(() => expect(screen.queryByText(/== ТАБЛИЦА/)).toBeNull());
+  });
+
+  it('после успешной генерации блок обновляется: новая ревизия наверху', async () => {
+    const calls = mockFetch(
+      { 'spec.yaml': SPEC_WITH_NONCANON_MASK, 'blocked_basic.txt': BLOCKED_10 },
+      { results: [{ name: 'result-20260913-100000.txt', mtimeIso: '2026-09-13T10:00:00.000Z' }] },
+    );
+    renderPanel();
+    await selectProject(PROJECT);
+    await screen.findByText(/result-20260913-100000\.txt/, {}, { timeout: 5000 });
+
+    fireEvent.click(screen.getByRole('button', { name: /Генерировать размещение/ }));
+    await screen.findByText(/Размещение найдено: result-20260913-120000\.txt/, {}, { timeout: 5000 });
+
+    // История перечитана после генерации; новая ревизия выше старой.
+    await waitFor(
+      () => {
+        const reads = calls.filter((c) => c.url.endsWith('/results')).length;
+        expect(reads).toBeGreaterThanOrEqual(2);
+      },
+      { timeout: 5000 },
+    );
+    const section = screen.getByText('Отчёты генераций').parentElement!;
+    const namesInOrder = Array.from(section.querySelectorAll('span')).map((s) => s.textContent ?? '');
+    const freshIdx = namesInOrder.findIndex((t) => t.includes('result-20260913-120000.txt'));
+    const oldIdx = namesInOrder.findIndex((t) => t.includes('result-20260913-100000.txt'));
+    expect(freshIdx).toBeGreaterThanOrEqual(0);
+    expect(oldIdx).toBeGreaterThanOrEqual(0);
+    expect(freshIdx).toBeLessThan(oldIdx);
   });
 });

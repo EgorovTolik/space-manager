@@ -9,7 +9,11 @@
 //   (отсутствующая маска = удаление файла, 02 §6.9);
 // - «⚡ Генерировать размещение» → автосохранение (если dirty) + `POST …/generate`;
 //   блок результата: exit 0 (зелёная строка + ссылка Viewer3D), exit 1 (infeasible —
-//   причина из блока до «== КАРТА ==»), HTTP-ошибка (422 — подсказка про валидацию).
+//   причина из блока до «== КАРТА ==»), HTTP-ошибка (422 — подсказка про валидацию);
+// - блок «Отчёты генераций» — история `result-*` проекта (`GET …/results`): имя+дата,
+//   «Открыть отчёт» (inline <details> с текстом, GET …/file?name=…) и ссылка «В 3D»;
+// - проекты: в селекторе показывается человекочитаемое `name`, а URL/API-запросы
+//   используют `slug` (замечание 2 единого сервиса).
 //
 // Сохраняются секции, оперирующие МОДЕЛЬЮ, а не файлами (docs-unified/04 §1.2):
 // W×H, «＋ Создать спеку…», управление масками (Добавить/Удалить), заметка о
@@ -26,10 +30,11 @@ import {
   ApiError,
   generatePlacement,
   listProjects,
+  listResults,
   loadProjectFile,
   saveProjectFiles,
 } from '../lib/api';
-import type { GenerateResult, ProjectInfo } from '../lib/api';
+import type { GenerateResult, ProjectInfo, ResultInfo } from '../lib/api';
 
 // Дефолты новой спеки (ТЗ 02 §4 п.4 — те же, что в парсинге docs/03).
 const DEFAULT_RULES: Rules = {
@@ -69,7 +74,10 @@ export default function ProjectFilesPanel(): JSX.Element {
 
   // ── Состояние панели (локальное React-состояние, store не меняется — §1.3) ───
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
+  // Выбранный проект — его SLUG (машинный идентификатор); в UI показываем name.
   const [selected, setSelected] = useState<string | null>(null);
+  // История result-* выбранного проекта (замечание 4); null — не загружена/нет проекта.
+  const [results, setResults] = useState<ResultInfo[] | null>(null);
   const [loadingProject, setLoadingProject] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [projectNotFound, setProjectNotFound] = useState<string | null>(null);
@@ -148,9 +156,12 @@ export default function ProjectFilesPanel(): JSX.Element {
         setProjects(list);
         const urlProject = new URLSearchParams(window.location.search).get('project');
         if (urlProject && urlProject.length > 0) {
-          if (list.some((p) => p.name === urlProject)) {
-            setSelected(urlProject); // селектор показывает автозагруженный проект
-            void loadProject(urlProject);
+          // URL-параметр несёт slug (ссылки менеджера/редактора); name — фолбэк.
+          const match =
+            list.find((p) => p.slug === urlProject) ?? list.find((p) => p.name === urlProject);
+          if (match) {
+            setSelected(match.slug); // селектор показывает автозагруженный проект
+            void loadProject(match.slug);
           } else {
             setProjectNotFound(urlProject);
           }
@@ -165,19 +176,19 @@ export default function ProjectFilesPanel(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function onProjectChosen(name: string): void {
-    if (name.length === 0) return;
-    setSelected(name);
+  function onProjectChosen(slug: string): void {
+    if (slug.length === 0) return;
+    setSelected(slug);
     setProjectNotFound(null);
     const url = new URL(window.location.href);
-    url.searchParams.set('project', name);
+    url.searchParams.set('project', slug);
     window.history.replaceState(null, '', url.toString());
-    void loadProject(name);
+    void loadProject(slug);
   }
 
   // ── Загрузка проекта (docs-unified/04 §1.3) ───────────────────────────────────
 
-  async function loadProject(name: string): Promise<void> {
+  async function loadProject(slug: string): Promise<void> {
     if (isDirty() && !window.confirm(ru.files.overwriteConfirm)) return;
     setLoadingProject(true);
     setLoadError(null);
@@ -185,9 +196,10 @@ export default function ProjectFilesPanel(): JSX.Element {
     setSavedAt(null);
     setGenResult(null);
     setGenError(null);
+    setResults(null); // история предыдущего проекта не показывается
     setFileMissing({ blocked: false, preset: false });
     try {
-      const specText = await loadProjectFile(name, 'spec.yaml');
+      const specText = await loadProjectFile(slug, 'spec.yaml');
       const { doc, unknownFields } = parseSpecWithWarnings(specText);
       // Нормализация имён масок (§1.3 п.2): содержимое читаем по ИСХОДНОМУ имени,
       // в модели — каноническое blocked.txt / preset.txt.
@@ -212,7 +224,7 @@ export default function ProjectFilesPanel(): JSX.Element {
       let loadedPreset: string | null = null; // сериализация для базлайна
       if (origBlocked) {
         try {
-          const text = await loadProjectFile(name, origBlocked);
+          const text = await loadProjectFile(slug, origBlocked);
           const mask = parseBlockedMaskAny(text);
           dispatch({ type: 'MASK_LOADED', kind: 'blocked', mask, fileName: 'blocked.txt' });
           loadedBlocked = mask;
@@ -223,7 +235,7 @@ export default function ProjectFilesPanel(): JSX.Element {
       }
       if (origPreset) {
         try {
-          const text = await loadProjectFile(name, origPreset);
+          const text = await loadProjectFile(slug, origPreset);
           const symbols = Object.values(doc.types).map((t) => t.symbol);
           const res = parsePresetMaskAny(text, symbols);
           dispatch({
@@ -247,6 +259,7 @@ export default function ProjectFilesPanel(): JSX.Element {
         preset: loadedPreset,
       };
       markClean(); // загрузка — не «изменение» (beforeunload/подтверждения)
+      void refreshResults(slug); // блок «Отчёты генераций» (замечание 4)
     } catch (e) {
       setLoadError(`${ru.project.loadError} ${errText(e)}`);
       // Состояние до этой загрузки НЕ сбрасывается (§1.3 п.4).
@@ -368,6 +381,16 @@ export default function ProjectFilesPanel(): JSX.Element {
     }
   }
 
+  // ── «Отчёты генераций»: история result-* проекта (замечание 4) ───────────────
+
+  async function refreshResults(slug: string): Promise<void> {
+    try {
+      setResults(await listResults(slug));
+    } catch {
+      setResults([]); // API-сбой не критичен для редактирования — блок пустой
+    }
+  }
+
   // ── «⚡ Генерировать размещение» (docs-unified/04 §1.6) ───────────────────────
 
   async function onGenerate(): Promise<void> {
@@ -384,6 +407,7 @@ export default function ProjectFilesPanel(): JSX.Element {
       // 2. POST generate (серверный таймаут 60 с вернёт 504 — клиентский не нужен).
       const res = await generatePlacement(selected);
       setGenResult(res);
+      void refreshResults(selected); // новая ревизия — наверху списка (замечание 4)
     } catch (e) {
       const input = e instanceof ApiError && e.status === 422; // SOLVER_INPUT
       setGenError({ message: errText(e), input });
@@ -434,7 +458,7 @@ export default function ProjectFilesPanel(): JSX.Element {
           >
             <option value="">{ru.project.placeholder}</option>
             {(projects ?? []).map((p) => (
-              <option key={p.name} value={p.name}>
+              <option key={p.slug} value={p.slug}>
                 {p.name}
               </option>
             ))}
@@ -444,7 +468,12 @@ export default function ProjectFilesPanel(): JSX.Element {
           <div style={statusStyle}>{ru.project.loading}</div>
         )}
         {!loadingProject && projects !== null && selected && !loadError && (
-          <div style={statusStyle}>{ru.project.loaded.replace('{name}', selected)}</div>
+          <div style={statusStyle}>
+            {ru.project.loaded.replace(
+              '{name}',
+              (projects ?? []).find((p) => p.slug === selected)?.name ?? selected,
+            )}
+          </div>
         )}
         {!loadingProject && projects !== null && projects.length === 0 && (
           <div style={errorStyle}>{ru.project.noProjects}</div>
@@ -618,6 +647,18 @@ export default function ProjectFilesPanel(): JSX.Element {
           </div>
         )}
       </div>
+
+      {/* ── Отчёты генераций: история result-* проекта (замечание 4) ── */}
+      {selected !== null && results !== null && (
+        <div style={{ ...sectionStyle, borderTop: '1px solid #ddd', paddingTop: 8 }}>
+          <strong>{ru.project.historyTitle}</strong>
+          {results.length === 0 ? (
+            <div style={statusStyle}>{ru.project.historyEmpty}</div>
+          ) : (
+            results.map((r) => <ResultRow key={r.name} slug={selected} info={r} />)
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -644,6 +685,70 @@ function MaskSection(props: {
           ✕ {ru.buttons.remove}
         </button>
       </div>
+    </div>
+  );
+}
+
+// Строка истории «Отчёты генераций» (замечание 4): имя + дата, «Открыть отчёт»
+// (inline-раскрытие <details> с полным текстом — GET …/file?name=…) и ссылка «В 3D»
+// (/viewer3d?project=<slug>&result=<file>).
+function ResultRow(props: { slug: string; info: ResultInfo }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle(): Promise<void> {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    if (text === null && error === null) {
+      try {
+        setText(await loadProjectFile(props.slug, props.info.name));
+      } catch (e) {
+        setError(errText(e));
+      }
+    }
+  }
+
+  const when = new Date(props.info.mtimeIso);
+  const dateLabel = Number.isNaN(when.getTime())
+    ? props.info.mtimeIso
+    : when.toLocaleString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <div style={rowStyle}>
+        <span title={props.info.mtimeIso} style={{ fontSize: 12 }}>
+          {props.info.name} · {dateLabel}
+        </span>
+        <button type="button" style={btnStyle} onClick={() => void toggle()}>
+          {open ? ru.project.closeReport : ru.project.openReport}
+        </button>
+        <a
+          href={`/viewer3d?project=${encodeURIComponent(props.slug)}&result=${encodeURIComponent(props.info.name)}`}
+        >
+          {ru.project.report3d}
+        </a>
+      </div>
+      {open && error !== null && (
+        <div style={errorStyle}>
+          {ru.project.reportLoadError} {error}
+        </div>
+      )}
+      {open && text !== null && (
+        <details open style={{ marginTop: 4 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12 }}>{props.info.name}</summary>
+          <pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, margin: '4px 0' }}>{text}</pre>
+        </details>
+      )}
     </div>
   );
 }

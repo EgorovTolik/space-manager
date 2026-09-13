@@ -23,6 +23,9 @@ export interface MockOpts {
   extraProjects?: string[];
   /** Ответ на N-й POST …/generate. По умолчанию — feasible exit 0 с REPORT_OK. */
   generate?: (i: number) => { status?: number; body: unknown };
+  /** Начальная история result-* проекта (`GET …/results`); после успешной
+   *  генерации новая ревизия добавляется наверх (замечание 4). */
+  results?: { name: string; mtimeIso: string }[];
 }
 
 export async function mockProject(
@@ -32,9 +35,12 @@ export async function mockProject(
   opts: MockOpts = {},
 ): Promise<CapturedApi> {
   const captured: CapturedApi = { puts: [], events: [] };
+  // Историю result-* храним в замыкании: успешная генерация добавляет ревизию наверх.
+  let resultsList: { name: string; mtimeIso: string }[] = [...(opts.results ?? [])];
   const info = (n: string) => ({
     id: `id-${n}`,
     name: n,
+    slug: n, // человекочитаемое имя и slug совпадают (замечание 2)
     createdAt: '2026-09-13T12:00:00.000Z',
     updatedAt: '2026-09-13T12:00:00.000Z',
     latestResult: null,
@@ -75,12 +81,28 @@ export async function mockProject(
     return json(200, { saved: Object.keys(body.files ?? {}), deleted: [] });
   });
 
+  await page.route(/\/api\/projects\/[^/]+\/results/, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ results: resultsList }),
+    }),
+  );
+
   await page.route(/\/api\/projects\/[^/]+\/generate/, (route) => {
     const i = captured.events.filter((e) => e === 'generate').length;
     captured.events.push('generate');
     const resp = opts.generate
       ? opts.generate(i)
       : { status: 200, body: { resultFile: RESULT_FILE, exitCode: 0, feasible: true, report: REPORT_OK } };
+    // Успешная генерация (HTTP 200 + resultFile) → новая ревизия наверху списка.
+    const body = resp.body as { resultFile?: unknown };
+    if ((resp.status ?? 200) === 200 && typeof body.resultFile === 'string') {
+      resultsList = [
+        { name: body.resultFile, mtimeIso: '2026-09-13T12:05:00.000Z' },
+        ...resultsList.filter((r) => r.name !== body.resultFile),
+      ];
+    }
     return route.fulfill({
       status: resp.status ?? 200,
       contentType: 'application/json; charset=utf-8',

@@ -133,7 +133,7 @@ export const ru = {
     noErrors: 'Ошибок валидации нет',
   },
   beforeUnload: 'Есть несохранённые изменения — сохраните их в проект.',
-  toProjects: '← К проектам',
+  toProjects: 'К проектам',
   // Строки проектного режима (docs-unified/04 §1.3–§1.8).
   project: {
     section: 'Проект:',
@@ -159,6 +159,13 @@ export const ru = {
     infeasibleLead: 'Не удалось разместить все кластеры.',
     genErrorTitle: 'Ошибка генерации:',
     genInputHint: 'Исправьте ошибки валидации и повторите',
+    // Блок «Отчёты генераций» (история result-* проекта, замечание 4).
+    historyTitle: 'Отчёты генераций',
+    historyEmpty: 'Результатов пока нет',
+    openReport: 'Открыть отчёт',
+    closeReport: 'Свернуть отчёт',
+    report3d: 'В 3D',
+    reportLoadError: 'Не удалось загрузить отчёт:',
   },
   hints: {
     gridStub: 'Canvas-редактор сетки — следующая подзадача.',

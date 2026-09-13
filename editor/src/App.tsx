@@ -101,20 +101,33 @@ function Layout(): JSX.Element {
 export default function App(): JSX.Element {
   return (
     <EditorProvider>
+      {/* Тулбар: самая левая кнопка — зелёная «К проектам» (менеджер, /),
+          затем заголовок (замечание 1 единого сервиса). */}
       <div
         style={{
           display: 'flex',
-          alignItems: 'baseline',
+          alignItems: 'center',
           gap: 12,
           margin: '6px 8px',
           fontSize: '16px',
         }}
       >
-        <h1 style={{ margin: 0 }}>{ru.appTitle}</h1>
-        {/* docs-unified/04 §1.2: заголовок — кнопка «← К проектам» (менеджер, /) */}
-        <a href="/" style={{ fontSize: '13px', color: '#1565c0' }}>
+        <a
+          href="/"
+          style={{
+            display: 'inline-block',
+            padding: '5px 14px',
+            background: '#2e7d32',
+            color: '#fff',
+            fontSize: '13px',
+            fontWeight: 600,
+            borderRadius: '4px',
+            textDecoration: 'none',
+          }}
+        >
           {ru.toProjects}
         </a>
+        <h1 style={{ margin: 0 }}>{ru.appTitle}</h1>
       </div>
       <Layout />
     </EditorProvider>

@@ -18,8 +18,11 @@ test.describe('Загрузка проекта (docs-unified/04 §1.3)', () => {
     await expect(page).toHaveTitle(/.+/);
     await expect(page.getByRole('heading', { name: APP_TITLE })).toBeVisible();
 
-    // Заголовок: кнопка «← К проектам» (docs-unified/04 §1.2) ведёт в менеджер.
-    await expect(page.getByRole('link', { name: '← К проектам' })).toHaveAttribute('href', '/');
+    // Тулбар: самая левая кнопка — зелёная «К проектам» (менеджер, /) — замечание 1.
+    const toProjects = page.getByRole('link', { name: 'К проектам' });
+    await expect(toProjects).toHaveAttribute('href', '/');
+    // Кнопка левее заголовка (порядок элементов тулбара).
+    await expect(toProjects.evaluate((el) => el.parentElement!.firstElementChild === el)).toBeTruthy();
 
     // До проекта: правые панели заблокированы, подпись «Сначала загрузите спекацию».
     await expect(page.getByText('Сначала загрузите спекацию').first()).toBeVisible();
