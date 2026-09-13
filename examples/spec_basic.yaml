@@ -1,6 +1,6 @@
 # =====================================================================
 # Базовая спекация размещения (docs/03 §1, пример 10×10).
-# Запуск: python -m spaec_manager place examples/spec_basic.yaml
+# Запуск: python -m space_manager place examples/spec_basic.yaml
 # =====================================================================
 
 grid:

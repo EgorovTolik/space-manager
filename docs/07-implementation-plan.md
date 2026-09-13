@@ -9,7 +9,7 @@
 ## 1. Структура проекта
 
 ```
-spaec-manager/
+space-manager/
 ├── README.md                      # мастер-бриф (задача + ссылки на docs)
 ├── docs/                          # вся проектная документация
 │   ├── 01-problem-statement.md
@@ -20,14 +20,14 @@ spaec-manager/
 │   ├── 06-io-and-reporting.md
 │   ├── 07-implementation-plan.md
 │   └── 08-workflow-subagents.md
-├── spaec_manager/                 # основной пакет
+├── space_manager/                 # основной пакет
 │   ├── __init__.py
 │   ├── models.py                  # dataclass'ы: Grid, Cell, ClusterType, Ruleset, ...
 │   ├── spec_io.py                 # парсинг YAML + blocked/preset файлы, валидация
 │   ├── rules.py                   # валидаторы: связность, формы, соседство; fill_ratio
 │   ├── solver.py                  # backtracking + MRV + forward-checking, целевая функция
 │   ├── report.py                  # ASCII-рендер, таблица, предупреждения, диагностика
-│   └── cli.py                     # argparse: python -m spaec_manager place spec.yaml
+│   └── cli.py                     # argparse: python -m space_manager place spec.yaml
 ├── examples/                      # примеры спекаций и масок
 │   ├── spec_basic.yaml
 │   ├── blocked_basic.txt
@@ -45,7 +45,7 @@ spaec-manager/
 | 3 | `rules.py` — валидаторы/оценщики | models | связность(8), rect, circle, fill_ratio, adjacency_ok работают; покрыты тестами |
 | 4 | `report.py` — рендер и отчёт | models, rules | строит ASCII-карту + таблицу + предупреждения + причину невозможности (см. [06](./06-io-and-reporting.md)) |
 | 5 | `solver.py` — поиск размещения | models, rules, report | находит валидное размещение для базовых примеров; сообщает причину при невозможности (см. [05](./05-solver-design.md)) |
-| 6 | `cli.py` + интеграция | всё выше | `python -m spaec_manager place spec.yaml` работает сквозным образом (end-to-end), exit-codes по [06](./06-io-and-reporting.md) §7 |
+| 6 | `cli.py` + интеграция | всё выше | `python -m space_manager place spec.yaml` работает сквозным образом (end-to-end), exit-codes по [06](./06-io-and-reporting.md) §7 |
 
 > Модули 1–4 можно делать раньше солвера: модель + рендер дают видимый результат
 > (карта), что удобно для проверки на ранних этапах.

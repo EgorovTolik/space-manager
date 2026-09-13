@@ -39,7 +39,7 @@ Data flow: файл → `FileReader.readAsText` → `parseReport(text)` (02) →
 
 **Варианты:** А) вся логика на клиенте (парсинг отчёта и геометрия — чистые TS-модули
 в браузере, Express только статика); Б) серверный API принимает файл, вызывает Python
-`spaec_manager` и отдаёт JSON-модель.
+`space_manager` и отдаёт JSON-модель.
 
 **Решение: А.** Причины:
 
@@ -130,11 +130,11 @@ Python-пакета. Структура:
 
 ```
 space-manager/                       # корень репозитория (без изменений)
-├── README.md, docs/, spaec_manager/, examples/, tests/ ...
+├── README.md, docs/, space_manager/, examples/, tests/ ...
 ├── docs-editor/, editor/            # существующие компоненты (НЕ трогать)
 ├── docs-viewer3d/                   # это ТЗ
 └── viewer3d/                        # НОВЫЙ: самостоятельный npm-проект
-    ├── package.json                 # name "spaec-viewer3d"; deps и devDeps — §2.5
+    ├── package.json                 # name "space-viewer3d"; deps и devDeps — §2.5
     ├── tsconfig.json                # strict: true (как в editor/)
     ├── vite.config.ts               # dev-сервер 5174, proxy /api → localhost:3200 (§6)
     ├── server/
@@ -233,12 +233,12 @@ npm start          # express раздаёт dist/ (статика + SPA-fallback
 
 Express участвует только в стартовом `GET /api/health` (статус-строка UI) и раздате статики.
 
-### 2.8 Граница совместимости с spaec-manager
+### 2.8 Граница совместимости с space-manager
 
 Единственный формальный контракт — **текстовый формат отчёта**:
 
-1. источник истины — `spaec_manager/report.py::build_report` / `render_grid` /
-   `format_table` и `spaec_manager/cli.py::_place` (запись `report_text + "\n"`);
+1. источник истины — `space_manager/report.py::build_report` / `render_grid` /
+   `format_table` и `space_manager/cli.py::_place` (запись `report_text + "\n"`);
 2. полевой контракт зафиксирован в [02-input-parser](./02-input-parser.md) §1 — этот
    раздел ТЗ является спецификацией для парсера;
 3. viewer НЕ импортирует Python и не зависит от него в runtime; совместимость

@@ -1,4 +1,4 @@
-"""Unit-тесты spaec_manager/rules.py (docs/04, docs/05 §2/§4).
+"""Unit-тесты space_manager/rules.py (docs/04, docs/05 §2/§4).
 
 Позитивные и негативные кейсы для каждого валидатора/оценщика:
 8-связность vs 4, диагональный контакт adjacency, circle с допуском,
@@ -7,8 +7,8 @@ fill_ratio на вырожденных формах.
 
 import pytest
 
-from spaec_manager.models import Ruleset
-from spaec_manager.rules import (
+from space_manager.models import Ruleset
+from space_manager.rules import (
     adjacency_ok,
     adjacency_violation,
     all_clusters_touch,
@@ -377,7 +377,7 @@ class TestSoftCost:
 class TestAllClustersTouch:
     @staticmethod
     def _inst(cells):
-        from spaec_manager.models import ClusterInstance
+        from space_manager.models import ClusterInstance
 
         return ClusterInstance(id="x", type_id="T", area_percent=10.0, actual_cells=list(cells))
 

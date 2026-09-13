@@ -10,7 +10,7 @@
 | `lib/reportParser.ts`, `lib/walls.ts`, `lib/palette.ts` | **Vitest** (unit, node-среда, без DOM) | 100% кодов V-*/W-*; алгоритм меток (§6 ТЗ 02); эталонная геометрия стен (ТЗ 03 §6.1); инвариант покрытия (ТЗ 03 §7) |
 | SPA в браузере | **Playwright** (e2e, Chromium headless) | загрузка файла → список комнат; параметры; PNG-снапшот; ошибка парсинга в UI |
 | Визуальные аспекты 3D (WebGL) | ручной чек-лист (§6) | внешний вид стен/полов, плавность камеры — e2e WebGL-пиксели НЕ проверяет (решение: headless SwiftShader нестабилен для pixel-ассертов; e2e ограничивается DOM + наличием canvas) |
-| Совместимость с реальным CLI | интеграционный тест (§5) | свежесгенерированный отчёт `spaec_manager` отображается корректно |
+| Совместимость с реальным CLI | интеграционный тест (§5) | свежесгенерированный отчёт `space_manager` отображается корректно |
 
 Скрипты npm — как в `editor/package.json`: `test` (vitest run), `e2e`
 (`npm run build && playwright test`). e2e поднимает prod-сервер на порту **3210**
@@ -22,7 +22,7 @@
 
 | Фикстура | Как получается | Содержимое / назначение |
 |---|---|---|
-| `report_basic.txt` | `.venv/bin/python -m spaec_manager place examples/spec_basic.yaml --seed 7 --out ...` (коммитится в репозиторий) | 50×50; комнаты: R=650, W=375, C=225; таблица `corridor1/CORRIDOR/225`, `room1/ROOM1/650`, `room2/ROOM2/375`; «ПРЕДУПРЕЖДЕНИЯ: нет» |
+| `report_basic.txt` | `.venv/bin/python -m space_manager place examples/spec_basic.yaml --seed 7 --out ...` (коммитится в репозиторий) | 50×50; комнаты: R=650, W=375, C=225; таблица `corridor1/CORRIDOR/225`, `room1/ROOM1/650`, `room2/ROOM2/375`; «ПРЕДУПРЕЖДЕНИЯ: нет» |
 | `report_minimal.txt` | ручной (эталон ТЗ 03 §6.1) | карта 4×3 (A/B/C/D + клетка `.` в `(1,1)`); таблица: `ra/A/3`, `rb/B/2`, `rc/C/4`, `rd/D/2` — строки B и D неоднозначны (оба факт=2) |
 | `report_ambiguous.txt` | ручной | 6×1: `RR..RR`; одна строка таблицы `r1/R/2` |
 | `report_infeasible.txt` | ручной | блок «НЕ УДАЛОСЬ…» + карта 3×3 с одной комнатой + таблица со строкой факт=0 |
@@ -88,7 +88,7 @@ WebGL-ассерты намеренно ограничены «canvas сущес
 **Критический тест** (интеграционный, vitest):
 
 1. если существует `.venv/bin/python` в корне репозитория — выполнить
-   `python -m spaec_manager place examples/spec_basic.yaml --seed 7 --out <tmp>/fresh.txt`;
+   `python -m space_manager place examples/spec_basic.yaml --seed 7 --out <tmp>/fresh.txt`;
    иначе использовать закоммиченную фикстуру `report_basic.txt` (режим skip-с-пометкой,
    паттерн интеграционных тестов `editor/`);
 2. `parseReport(fresh)` → без ошибок;
@@ -122,7 +122,7 @@ infeasible-отчёт). Все пункты должны выполняться:
 
 Генерация отчёта 200×200 для п.12: временная спекация `/tmp/spec_big.yaml`
 (`grid: {width: 200, height: 200}`, `types: {A:{symbol:"a"},B:{symbol:"b"},C:{symbol:"c"},D:{symbol:"d"}}`,
-4 кластера по 25% free) → `.venv/bin/python -m spaec_manager place /tmp/spec_big.yaml --seed 1`.
+4 кластера по 25% free) → `.venv/bin/python -m space_manager place /tmp/spec_big.yaml --seed 1`.
 Допустим и частично размещённый результат — для замера важна сетка 200×200.
 
 ## 7. Нефункциональные требования (производительность, лимиты)

@@ -4,10 +4,10 @@
 Все тесты детерминированы (фиксированные спекации и seed) и быстрые.
 """
 
-from spaec_manager.models import CellState
-from spaec_manager.rules import clusters_touch, is_circle, is_connected, is_rectangle
-from spaec_manager.spec_io import parse_spec
-from spaec_manager.solver import solve, solve_grid
+from space_manager.models import CellState
+from space_manager.rules import clusters_touch, is_circle, is_connected, is_rectangle
+from space_manager.spec_io import parse_spec
+from space_manager.solver import solve, solve_grid
 
 
 def _spec(yaml_text: str) -> "object":
@@ -311,7 +311,7 @@ rules: {}
 clusters:
   - {id: a1, type: A, areaPercent: 50}
 """)
-    from spaec_manager.spec_io import prepare_placement
+    from space_manager.spec_io import prepare_placement
 
     grid, instances = prepare_placement(spec)
     result = solve_grid(grid, instances, spec.rules)
@@ -326,7 +326,7 @@ clusters:
 # ---------------------------------------------------------------------------
 
 def test_touch_all_produces_single_connected_group():
-    from spaec_manager.rules import all_clusters_touch
+    from space_manager.rules import all_clusters_touch
 
     spec = _spec("""
 grid: {width: 12, height: 8}
@@ -358,7 +358,7 @@ clusters:
 
 def test_touch_all_default_off_unchanged_behavior():
     """Без touchAll кластеры могут быть разнесены — поведение не изменилось."""
-    from spaec_manager.rules import all_clusters_touch
+    from space_manager.rules import all_clusters_touch
 
     spec = _spec("""
 grid: {width: 10, height: 8}

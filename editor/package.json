@@ -1,9 +1,9 @@
 {
-  "name": "spaec-config-editor",
+  "name": "space-config-editor",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Веб-редактор входных файлов spaec-manager (ТЗ: docs-editor/)",
+  "description": "Веб-редактор входных файлов space-manager (ТЗ: docs-editor/)",
   "scripts": {
     "dev": "concurrently -n vite,api -c cyan,green \"vite\" \"tsx server/index.ts\"",
     "build": "tsc --noEmit && vite build",

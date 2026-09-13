@@ -71,7 +71,7 @@ workspace (case-sensitive на Linux/macOS APFS по умолчанию).
 | Произвольный файл проекта (чтение) | `^[A-Za-z0-9._-]+$` и без подстроки `..`, не начинается с `.` | `spec.yaml`, `blocked_basic.txt` |
 
 Timestamp — локальное время, формат `YYYYmmdd-HHMMSS` — **тот же**, что у CLI
-(`spaec_manager/cli.py::default_result_name`) и viewer3d (`snapshotFileName`).
+(`space_manager/cli.py::default_result_name`) и viewer3d (`snapshotFileName`).
 
 ## 4. Шаблон нового проекта (создание через `POST /api/projects`)
 
@@ -112,7 +112,7 @@ clusters:
 `examples/spec_basic.yaml`); `areaPercent: 100` + `shape: free` + один тип →
 единственный кластер занимает всю сетку, размещение тривиально возможно (exit 0);
 маски указаны каноническими именами (`dumpSpec` редактора пишет basename без `./`,
-`load_spec` Python резолвит их от каталога спеки — `spaec_manager/spec_io.py`).
+`load_spec` Python резолвит их от каталога спеки — `space_manager/spec_io.py`).
 
 ### 4.2 `blocked.txt` и `preset.txt` (побайтовый эталон)
 
@@ -299,14 +299,14 @@ presetFile`). Заголовки: `Content-Type: text/plain; charset=utf-8` дл
 Сервер выполняет синхронно:
 
 ```
-spawn(SPACEMGR_PYTHON, ['-m', 'spaec_manager', 'place',
+spawn(SPACEMGR_PYTHON, ['-m', 'space_manager', 'place',
         <abs>/workspace/<p>/spec.yaml', '--out', <abs>/workspace/<p>/result-<ts>.txt])
 ```
 
 Правила исполнения:
 
 - `cwd` = каталог проекта (на корректность не влияет: `load_spec` резолвит маски от
-  каталога спеки — `spaec_manager/spec_io.py`, но фиксируем для детерминизма логов).
+  каталога спеки — `space_manager/spec_io.py`, но фиксируем для детерминизма логов).
 - Имя результата: `result-<YYYYmmdd-HHMMSS>.txt`; при коллизии (запуск в ту же
   секунду) — суффиксы `-1`, `-2`, … до свободного имени.
 - **Hard timeout = 60 000 мс**: по срабатыванию процесс убивается (`SIGKILL`),

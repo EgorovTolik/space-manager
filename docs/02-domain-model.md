@@ -3,7 +3,7 @@
 > Сводный индекс: [../README.md](../README.md) · Постановка: [01-problem-statement.md](./01-problem-statement.md)
 
 Доменная модель описывает сущности, которые используют и спекация, и солвер,
-и отчёт. Реализация на Python — в пакете `spaec_manager` (см. [07-implementation-plan.md](./07-implementation-plan.md)).
+и отчёт. Реализация на Python — в пакете `space_manager` (см. [07-implementation-plan.md](./07-implementation-plan.md)).
 
 ## 1. Cell — ячейка сетки
 

@@ -1,4 +1,4 @@
-// Парсер отчёта CLI spaec_manager (result-*.txt) — ТЗ 02 §4–§6.
+// Парсер отчёта CLI space_manager (result-*.txt) — ТЗ 02 §4–§6.
 // Чистая детерминированная функция: без DOM/React/three, все строковые операции
 // — в семантике код-поинтов (Array.from), как у Python-рендера (ТЗ 02 §1.2).
 
@@ -124,7 +124,7 @@ export function parseReport(text: string): ParsedReport {
   // --- шаг 1. заголовок карты ------------------------------------------------
   const i0 = lines.indexOf(MAP_HEADER);
   if (i0 === -1) {
-    err('V-NO-MAP', 'Файл не похож на отчёт spaec_manager: не найдена секция "== КАРТА =="');
+    err('V-NO-MAP', 'Файл не похож на отчёт space_manager: не найдена секция "== КАРТА =="');
     throw new ReportParseError(issues);
   }
 

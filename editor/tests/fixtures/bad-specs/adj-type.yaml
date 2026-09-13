@@ -1,4 +1,4 @@
-# V-ADJ-TYPE: в forbidden указан неизвестный тип Z (spaec_manager: exit 2)
+# V-ADJ-TYPE: в forbidden указан неизвестный тип Z (space_manager: exit 2)
 grid:
   width: 10
   height: 10

@@ -14,10 +14,10 @@
 
 ```bash
 # базовый вызов: отчёт выводится в stdout и сохраняется в result-<timestamp>.txt
-python -m spaec_manager place spec.yaml
+python -m space_manager place spec.yaml
 
 # с настройкой бюджета поиска и явным именем файла отчёта
-python -m spaec_manager place spec.yaml --time-budget 30 --out result.txt
+python -m space_manager place spec.yaml --time-budget 30 --out result.txt
 ```
 
 Параметры (задел):

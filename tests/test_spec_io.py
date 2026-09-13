@@ -7,8 +7,8 @@
 
 import pytest
 
-from spaec_manager.models import CellState, Shape
-from spaec_manager.spec_io import (
+from space_manager.models import CellState, Shape
+from space_manager.spec_io import (
     SpecValidationError,
     area_base,
     load_spec,

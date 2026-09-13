@@ -1,10 +1,10 @@
-"""Unit-тесты spaec_manager/report.py (docs/06)."""
+"""Unit-тесты space_manager/report.py (docs/06)."""
 
 from typing import Dict, List, Optional, Tuple
 
 import pytest
 
-from spaec_manager.models import (
+from space_manager.models import (
     Cell,
     CellState,
     ClusterInstance,
@@ -12,7 +12,7 @@ from spaec_manager.models import (
     Grid,
     PlacementResult,
 )
-from spaec_manager import report
+from space_manager import report
 
 
 # ---------------------------------------------------------------------------

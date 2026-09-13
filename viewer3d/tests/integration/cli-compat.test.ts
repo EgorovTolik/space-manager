@@ -51,13 +51,13 @@ const hasVenv = fs.existsSync(VENV_PYTHON);
 describe('сквозной тест совместимости с CLI', () => {
   // skip-с-пометкой (ТЗ 05 §5): без venv свежая генерация невозможна — берём фикстуру.
   const freshTest = hasVenv ? test : test.skip;
-  freshTest('свежесгенерированный отчёт spaec_manager отображается корректно', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'spaec-viewer3d-'));
+  freshTest('свежесгенерированный отчёт space_manager отображается корректно', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'space-viewer3d-'));
     const out = path.join(tmp, 'fresh.txt');
     try {
       execFileSync(
         VENV_PYTHON,
-        ['-m', 'spaec_manager', 'place', SPEC_FILE, '--seed', '7', '--out', out],
+        ['-m', 'space_manager', 'place', SPEC_FILE, '--seed', '7', '--out', out],
         { cwd: REPO_ROOT, timeout: 120_000, stdio: 'pipe' },
       );
       assertReportContent(fs.readFileSync(out, 'utf8'));

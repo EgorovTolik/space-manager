@@ -27,9 +27,9 @@ describe('maskText: побайтовый round-trip эталонов examples (�
     expect(dumpMask(mask)).toBe(text);
   });
 
-  it('blocked_touchall.txt (12×8) идентичен побайтово', () => {
+  it('blocked_touchall.txt (12×12) идентичен побайтово', () => {
     const text = readExample('blocked_touchall.txt');
-    const mask = parseBlockedMask(text, 12, 8);
+    const mask = parseBlockedMask(text, 12, 12);
     expect(dumpMask(mask)).toBe(text);
   });
 

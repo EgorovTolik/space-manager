@@ -20,10 +20,10 @@
 │   • статика: / → app/dist, /editor/* → ../editor/dist, /viewer3d/* → ../viewer3d/dist          │
 │   • API /api/*: проекты CRUD, файлы, генерация, архивы, preview                                │
 │   • fs-операции в <root>/workspace/                                                             │
-│   • child_process.spawn(.venv/bin/python -m spaec_manager place …)                              │
+│   • child_process.spawn(.venv/bin/python -m space_manager place …)                              │
 └───────────────────────────────────────────────┬────────────────────────────────────────────────┘
                                                 │ spawn (синхронно для запроса, timeout 60 с)
-                     <root>/.venv/bin/python -m spaec_manager place <проект>/spec.yaml --out …
+                     <root>/.venv/bin/python -m space_manager place <проект>/spec.yaml --out …
 ```
 
 Ключевые свойства:
@@ -33,13 +33,13 @@
 - **Единое рабочее пространство** `<root>/workspace/` — единственное место на диске,
   где сервис создаёт/меняет данные (см. [02](./02-workspace-api.md) §1).
 - **Python-солвер не трогается**: вызывается как внешний процесс; контракт — CLI
-  (`spaec_manager/cli.py`) и текст отчёта (`spaec_manager/report.py`).
+  (`space_manager/cli.py`) и текст отчёта (`space_manager/report.py`).
 
 ## 2. Структура нового каталога `app/`
 
 ```
 app/
-├── package.json           # имя: spaec-unified-app; type: module
+├── package.json           # имя: space-unified-app; type: module
 ├── tsconfig.json          # strict — как в editor/ и viewer3d/
 ├── vite.config.ts         # dev-сервер 5175, proxy /api → http://localhost:4080 (см. §5)
 ├── index.html             # Vite-вход SPA менеджера
@@ -148,7 +148,7 @@ POST /api/projects {name:p1}   →    GET  /api/projects                   GET  
                                      GET  …/p1/file?name=preset.txt       (смена ревизии: fetch другого файла)
                                      [правка canvas/панелей]
                                      PUT  …/p1/files {spec.yaml, blocked.txt, preset.txt}
-                                     POST …/p1/generate ──→ сервер: .venv/bin/python -m spaec_manager
+                                     POST …/p1/generate ──→ сервер: .venv/bin/python -m space_manager
                                             ↓                        place p1/spec.yaml --out p1/result-<ts>.txt
                                      {resultFile, exitCode, report}    (по имени из ответа)
                                      [кнопка «Открыть в viewer3d»] ──────────→ GET …/p1/file?name=result-<ts>.txt

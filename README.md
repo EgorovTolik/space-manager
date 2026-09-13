@@ -1,4 +1,4 @@
-# spaec-manager — размещение кластеров на пиксельной сетке
+# space-manager — размещение кластеров на пиксельной сетке
 
 **Мастер-бриф проекта.** Этот файл — максимально полное описание задачи и точка
 входа в документацию. Он используется для постановки задачи в сессии разработки.
@@ -68,7 +68,7 @@
 
 **Следующее действие в сессии разработки:**
 1. Прочитать [07-implementation-plan.md](docs/07-implementation-plan.md).
-2. Создать каркас проекта (пакет `spaec_manager`, `pyproject.toml`, `examples/`, `tests/`).
+2. Создать каркас проекта (пакет `space_manager`, `pyproject.toml`, `examples/`, `tests/`).
 3. Реализовать подзадачи **строго по очереди через субагентов** в порядке:
    `models.py` → `spec_io.py` → `rules.py` → `report.py` → `solver.py` → `cli.py`
    (см. [08-workflow-subagents.md](docs/08-workflow-subagents.md)).

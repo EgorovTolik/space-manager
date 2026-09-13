@@ -1,4 +1,4 @@
-# V-GRID-DIMS: width = 0 — не положительное целое (editor: SpecParseError; spaec_manager: exit 2)
+# V-GRID-DIMS: width = 0 — не положительное целое (editor: SpecParseError; space_manager: exit 2)
 grid:
   width: 0
   height: 10

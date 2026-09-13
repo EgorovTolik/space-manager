@@ -55,7 +55,7 @@ Stub — bash-скрипт в tmp: читает argv, пишет файл из `
 отчёта, завершается кодом из env/файла-управления.
 | Кейс | Ожидание |
 |---|---|
-| exit 0 | 200 `{resultFile, exitCode:0, feasible:true, report}`; файл создан в каталоге проекта; `latestResult` обновлён; аргументы spawn: `-m spaec_manager place <abs spec> --out <abs result>` |
+| exit 0 | 200 `{resultFile, exitCode:0, feasible:true, report}`; файл создан в каталоге проекта; `latestResult` обновлён; аргументы spawn: `-m space_manager place <abs spec> --out <abs result>` |
 | exit 1 (infeasible-отчёт) | 200, `feasible:false`, `report` содержит «НЕ УДАЛОСЬ РАЗМЕСТИТЬ ВСЕ КЛАСТЕРЫ.»; файл создан; latestResult обновлён |
 | exit 2 | 422 `SOLVER_INPUT`, message = stderr stub'а; файла результата НЕТ; latestResult не изменился |
 | timeout (stub `sleep 70`) | 504 `SOLVER_TIMEOUT` за ~60 с (в тесте — уменьшенный лимит через параметр createApp, дефолт 60 с); частичный файл stub'а удалён; процесс не живёт |

@@ -1,7 +1,7 @@
 // Все строки UI. RU — единственный язык (вводная №6).
 
 export const ru = {
-  appTitle: 'Редактор конфигураций spaec-manager',
+  appTitle: 'Редактор конфигураций space-manager',
   panels: {
     files: 'Файлы',
     grid: 'Сетка',

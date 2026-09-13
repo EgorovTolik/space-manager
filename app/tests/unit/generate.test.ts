@@ -50,7 +50,7 @@ describe('Генерация (stub-python, ТЗ 05 §3.3)', () => {
     const args = ctx.readStubArgs();
     expect(args).toEqual([
       '-m',
-      'spaec_manager',
+      'space_manager',
       'place',
       path.join(dir(), 'spec.yaml'),
       '--out',

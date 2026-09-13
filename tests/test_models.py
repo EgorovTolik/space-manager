@@ -1,6 +1,6 @@
 """Unit-тесты доменной модели (docs/02)."""
 
-from spaec_manager.models import (
+from space_manager.models import (
     Cell,
     CellState,
     ClusterInstance,

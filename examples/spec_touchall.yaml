@@ -1,14 +1,14 @@
 # =====================================================================
 # Пример touchAll (docs/04 §9): все кластеры обязаны примыкать друг к
 # другу — единый «ком» без зазоров между кластерами.
-# Запуск: python -m spaec_manager place examples/spec_touchall.yaml
+# Запуск: python -m space_manager place examples/spec_touchall.yaml
 # =====================================================================
 
 grid:
   width: 12
   height: 12
 
-blockedFile: ./blocked_touchall.txt   # одна заблокированная клетка в углу → F = 95
+blockedFile: ./blocked_touchall.txt   # одна заблокированная клетка в углу → F = 143
 presetFile: null
 
 types:

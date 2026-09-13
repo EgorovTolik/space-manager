@@ -1,6 +1,6 @@
 // Сквозной тест совместимости (ТЗ 06 §3.3 — КЛЮЧЕВОЙ): файлы, сгенерированные
 // редактором (parseSpec/dumpSpec + parse*/dumpMask), принимаются эталонной системой
-// `python -m spaec_manager place <spec>`: валидный результат → exit 0 и карта в stdout;
+// `python -m space_manager place <spec>`: валидный результат → exit 0 и карта в stdout;
 // каждый fixtures/bad-specs/*.yaml (двойники кодов V-*, ТЗ 05 §4) → exit 2.
 //
 // Python берётся из env SPAEC_PYTHON или ../.venv/bin/python относительно editor/.
@@ -19,7 +19,7 @@ const testRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..'); // ed
 const projectRoot = resolve(testRoot, '..', '..'); // корень проекта space-manager/
 
 function pythonBin(): string | null {
-  const fromEnv = process.env.SPAEC_PYTHON;
+  const fromEnv = process.env.SPACE_PYTHON;
   if (fromEnv) return existsSync(fromEnv) ? fromEnv : null;
   const venv = join(projectRoot, '.venv', 'bin', 'python');
   return existsSync(venv) ? venv : null;
@@ -31,7 +31,7 @@ function runPlace(python: string, specPath: string, cwd: string): Promise<{ code
   return new Promise((res) => {
     execFile(
       python,
-      ['-m', 'spaec_manager', 'place', specPath],
+      ['-m', 'space_manager', 'place', specPath],
       { cwd, timeout: 60_000 },
       (error, out, stderr) => {
         const code = error ? Number((error as { code?: unknown }).code ?? -1) : 0;
@@ -82,11 +82,11 @@ clusters:
 `;
 
 const python = pythonBin();
-describe.runIf(Boolean(python))('Сквозная совместимость со spaec_manager (ТЗ 06 §3.3)', () => {
+describe.runIf(Boolean(python))('Сквозная совместимость со space_manager (ТЗ 06 §3.3)', () => {
   let dir: string;
 
   it('round-trip spec_basic.yaml через редактор → place → exit 0, карта в stdout', async () => {
-    dir = mkdtempSync(join(tmpdir(), 'spaec-e2e-'));
+    dir = mkdtempSync(join(tmpdir(), 'space-e2e-'));
     const text = dumpSpec(parseSpec(SPEC_BASIC)); // редактор: чтение + сериализация
     const p = join(dir, 'spec_basic.yaml');
     writeFileSync(p, text);
@@ -97,7 +97,7 @@ describe.runIf(Boolean(python))('Сквозная совместимость с�
   });
 
   it('10×10 спекация + маски через редактор (побайтовый dump) → place → exit 0', async () => {
-    dir = mkdtempSync(join(tmpdir(), 'spaec-e2e-'));
+    dir = mkdtempSync(join(tmpdir(), 'space-e2e-'));
     writeFileSync(join(dir, 'spec.yaml'), dumpSpec(parseSpec(SPEC_10X10)));
     // Маски: редактор читает и пересобирает канонически — эталоны round-trip'ятся побайтово.
     const blocked = parseBlockedMaskAny(BLOCKED_BASIC);
@@ -114,7 +114,7 @@ describe.runIf(Boolean(python))('Сквозная совместимость с�
   it.each(readdirSync(join(testRoot, 'fixtures', 'bad-specs')).filter((f) => f.endsWith('.yaml')))(
     'битая спекация fixtures/bad-specs/%s (двойник кода V-*) → exit 2',
     async (name) => {
-      dir = mkdtempSync(join(tmpdir(), 'spaec-e2e-'));
+      dir = mkdtempSync(join(tmpdir(), 'space-e2e-'));
       const src = readFileSync(join(testRoot, 'fixtures', 'bad-specs', name), 'utf8');
       const p = join(dir, name);
       writeFileSync(p, src);

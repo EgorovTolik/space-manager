@@ -1,7 +1,7 @@
 // Единый сервис space-manager (ТЗ docs-unified/01, 02): Express :4080.
 //   • статика: / → app/dist, /editor/* → ../editor/dist, /viewer3d/* → ../viewer3d/dist
 //   • API /api/*: проекты CRUD, файлы, генерация, архивы, preview
-//   • fs-операции в <root>/workspace/; spawn .venv/bin/python -m spaec_manager place …
+//   • fs-операции в <root>/workspace/; spawn .venv/bin/python -m space_manager place …
 // createApp() — чистая функция без listen (юнит-тесты, ТЗ 05 §1).
 import express from 'express';
 import fs from 'node:fs';
@@ -363,7 +363,7 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
         const outPath = path.join(dir, resultName);
         const run = await runSolver(
           cfg.pythonBin,
-          ['-m', 'spaec_manager', 'place', specPath, '--out', outPath],
+          ['-m', 'space_manager', 'place', specPath, '--out', outPath],
           { cwd: dir, timeoutMs: cfg.timeoutMs },
         );
 
@@ -539,7 +539,7 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
           .json({ error: 'INVALID_NAME', message: 'Тело запроса не является корректным JSON' });
         return;
       }
-      console.error('[spaec-unified] непредвиденная ошибка:', err);
+      console.error('[space-unified] непредвиденная ошибка:', err);
       res.status(500).json({ error: 'INTERNAL', message: 'Внутренняя ошибка сервера' });
     },
   );
@@ -560,11 +560,11 @@ if (isDirectRun) {
   createApp()
     .then((app) => {
       app.listen(port, host, () => {
-        console.log(`[spaec-unified] Express: http://${host}:${port} (workspace: ${resolveConfig({}).workspaceDir})`);
+        console.log(`[space-unified] Express: http://${host}:${port} (workspace: ${resolveConfig({}).workspaceDir})`);
       });
     })
     .catch((err: Error) => {
-      console.error('[spaec-unified] отказ в старте:', err.message);
+      console.error('[space-unified] отказ в старте:', err.message);
       process.exit(1);
     });
 }

@@ -1,9 +1,9 @@
 {
-  "name": "spaec-viewer3d",
+  "name": "space-viewer3d",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "3D-визуализатор размещения кластеров spaec-manager (ТЗ: docs-viewer3d/)",
+  "description": "3D-визуализатор размещения кластеров space-manager (ТЗ: docs-viewer3d/)",
   "scripts": {
     "dev": "concurrently -n vite,api -c cyan,green \"vite\" \"tsx server/index.ts\"",
     "build": "tsc --noEmit && vite build",

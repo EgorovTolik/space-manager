@@ -1,7 +1,7 @@
 """Интеграционные тесты (M4, docs/06 §2/§7, docs/07 §1).
 
 Сквозные сценарии: YAML → load_spec → solve → build_report; CLI через
-subprocess (``python -m spaec_manager place ...``) с проверкой exit-codes.
+subprocess (``python -m space_manager place ...``) с проверкой exit-codes.
 """
 
 import re
@@ -41,7 +41,7 @@ def _run_cli(*cli_args: str, cwd: Path = ROOT) -> "subprocess.CompletedProcess[s
         файла по умолчанию передают ``tmp_path``, чтобы не засорять репозиторий).
     """
     return subprocess.run(
-        [sys.executable, "-m", "spaec_manager", *cli_args],
+        [sys.executable, "-m", "space_manager", *cli_args],
         capture_output=True, text=True, cwd=str(cwd), timeout=120,
     )
 
@@ -59,9 +59,9 @@ def _write_spec(tmp_path: Path, yaml_text: str, extra_files=None) -> Path:
 # ---------------------------------------------------------------------------
 
 def test_end_to_end_spec_solve_report(tmp_path):
-    from spaec_manager.report import build_report
-    from spaec_manager.spec_io import load_spec
-    from spaec_manager.solver import solve
+    from space_manager.report import build_report
+    from space_manager.spec_io import load_spec
+    from space_manager.solver import solve
 
     spec_path = _write_spec(
         tmp_path, BASIC_SPEC_YAML, {"blocked.txt": BLOCKED_10X10},
@@ -111,22 +111,22 @@ def test_cli_place_examples_success(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_cli_place_examples_touchall(tmp_path):
-    from spaec_manager.report import build_report
-    from spaec_manager.rules import all_clusters_touch
-    from spaec_manager.spec_io import load_spec
-    from spaec_manager.solver import solve
+    from space_manager.report import build_report
+    from space_manager.rules import all_clusters_touch
+    from space_manager.spec_io import load_spec
+    from space_manager.solver import solve
 
     proc = _run_cli("place", str(EXAMPLES / "spec_touchall.yaml"), cwd=tmp_path)
     assert proc.returncode == 0, (proc.stdout, proc.stderr)
     out = proc.stdout
     assert "== КАРТА ==" in out
     assert "room1" in out and "corridor1" in out and "garden1" in out
-    # Карта 8 строк по 12 символов (сетка 12×8).
+    # Карта 12 строк по 12 символов (сетка 12×12).
     map_lines = [
         line for line in out.splitlines()
         if len(line) == 12 and set(line) <= set("RCG.*")
     ]
-    assert len(map_lines) == 8, "карта touchAll-примера должна быть 8 строк"
+    assert len(map_lines) == 12, "карта touchAll-примера должна быть 12 строк"
 
     # Сквозная проверка семантики: все кластеры образуют единый примыкающий ком.
     spec = load_spec(str(EXAMPLES / "spec_touchall.yaml"))
@@ -257,7 +257,7 @@ def test_cli_input_error_creates_no_files(tmp_path):
 
 def test_default_result_name_helper():
     """Генерация имени по умолчанию — чистая и детерминированная."""
-    from spaec_manager.cli import default_result_name
+    from space_manager.cli import default_result_name
 
     assert (
         default_result_name(datetime(2026, 1, 5, 9, 7, 3))

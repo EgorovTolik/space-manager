@@ -4,7 +4,7 @@
 import { expect, type Page } from '@playwright/test';
 import { RESULT_FILE, REPORT_OK } from './fixtures';
 
-export const APP_TITLE = 'Редактор конфигураций spaec-manager';
+export const APP_TITLE = 'Редактор конфигураций space-manager';
 
 // ── Мок API (docs-unified/02 §6) ────────────────────────────────────────────────
 

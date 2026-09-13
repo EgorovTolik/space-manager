@@ -4,4 +4,4 @@
 import os from 'node:os';
 import path from 'node:path';
 
-export const e2eWorkspace = path.join(os.tmpdir(), 'spaec-app-e2e-workspace');
+export const e2eWorkspace = path.join(os.tmpdir(), 'space-app-e2e-workspace');

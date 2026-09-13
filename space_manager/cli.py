@@ -1,4 +1,4 @@
-"""CLI: argparse, ``python -m spaec_manager place spec.yaml`` (docs/06 §2, §7).
+"""CLI: argparse, ``python -m space_manager place spec.yaml`` (docs/06 §2, §7).
 
 Публичный API:
 - :func:`main` — точка входа (вызывается из ``__main__.py``); возвращает exit-code.
@@ -33,9 +33,9 @@ import sys
 from datetime import datetime
 from typing import List, Optional
 
-from spaec_manager.report import EXIT_INPUT_ERROR, build_report, exit_code_for
-from spaec_manager.spec_io import SpecValidationError, load_spec
-from spaec_manager.solver import (
+from space_manager.report import EXIT_INPUT_ERROR, build_report, exit_code_for
+from space_manager.spec_io import SpecValidationError, load_spec
+from space_manager.solver import (
     DEFAULT_NODE_BUDGET,
     DEFAULT_SEED,
     DEFAULT_TIME_BUDGET_SECONDS,
@@ -46,7 +46,7 @@ from spaec_manager.solver import (
 def build_parser() -> argparse.ArgumentParser:
     """Парсер аргументов CLI (подкоманда ``place``)."""
     parser = argparse.ArgumentParser(
-        prog="spaec_manager",
+        prog="space_manager",
         description="Размещение замкнутых кластеров на пиксельной сетке.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)

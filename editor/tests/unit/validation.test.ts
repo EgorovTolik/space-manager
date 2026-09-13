@@ -6,9 +6,9 @@
 //  • негативные кейсы: валидное состояние → [] (в т.ч. граничные значения);
 //  • детерминированный порядок выдачи ошибок;
 //  • тест «двойников» (ТЗ 05 §4): таблица соответствия кодов редактора ↔
-//    ошибок spaec_manager — для каждого кода §2.1 зафиксирована невалидная
+//    ошибок space_manager — для каждого кода §2.1 зафиксирована невалидная
 //    спекация-фрагмент, которую отклоняет и редактор (parseSpec/validateAll),
-//    и spaec_manager (docs/03 §5, spec_io.py → SpecValidationError, exit 2).
+//    и space_manager (docs/03 §5, spec_io.py → SpecValidationError, exit 2).
 //    Вызов Python в unit-тесте НЕ делается — пары «код → YAML» фиксированы
 //    комментарием (Python-сторона проверяется интеграционно).
 
@@ -549,18 +549,18 @@ describe('V-MASK-CONFLICT (ТЗ 05 §2.5)', () => {
 
 // ── Тест «двойников» (ТЗ 05 §4) ────────────────────────────────────────────
 // Таблица соответствия: каждый код V-* из ТЗ 05 §2.1 имеет «двойника» в
-// списке ошибок парсинга spaec_manager (docs/03 §5, spec_io.py → exit 2).
+// списке ошибок парсинга space_manager (docs/03 §5, spec_io.py → exit 2).
 // Для каждого кода зафиксирован невалидный YAML-фрагмент, который:
 //   • редактор отклоняет — на parseSpec (V-GRID-DIMS, V-SHAPE, V-TOUCHALL-TYPE)
 //     или на уровне модели validateAll (V-CLUST-TYPE, V-CLUST-ID, V-CLUST-SUM,
 //     V-ADJ-TYPE; для V-MASK-DIM — MaskParseError при чтении маски);
-//   • spaec_manager отклоняет — по той же сути (указано в note).
+//   • space_manager отклоняет — по той же сути (указано в note).
 
 interface TwinCase {
   code: string;
   yaml: string;
   via: 'parse' | 'model' | 'mask';
-  note: string; // как этот фрагмент отклоняет spaec_manager
+  note: string; // как этот фрагмент отклоняет space_manager
 }
 
 const TWIN_CASES: TwinCase[] = [
@@ -568,60 +568,60 @@ const TWIN_CASES: TwinCase[] = [
     code: 'V-GRID-DIMS',
     yaml: 'grid:\n  width: 0\n  height: 5\ntypes: {}\nrules: {}\nclusters: []\n',
     via: 'parse',
-    note: 'spaec_manager: SpecValidationError «width/height не положительные целые» (spec_io._parse_grid, docs/03 §5 п.1)',
+    note: 'space_manager: SpecValidationError «width/height не положительные целые» (spec_io._parse_grid, docs/03 §5 п.1)',
   },
   {
     code: 'V-MASK-DIM',
     yaml:
       'grid:\n  width: 10\n  height: 10\nblockedFile: small_mask.txt\ntypes: {}\nrules: {}\nclusters: []\n',
     via: 'mask',
-    note: 'spaec_manager: SpecValidationError при чтении маски «размер ≠ grid» (spec_io.read_blocked_file, docs/03 §5 п.2); редактор: MaskParseError V-MASK-DIM в parseBlockedMask',
+    note: 'space_manager: SpecValidationError при чтении маски «размер ≠ grid» (spec_io.read_blocked_file, docs/03 §5 п.2); редактор: MaskParseError V-MASK-DIM в parseBlockedMask',
   },
   {
     code: 'V-CLUST-TYPE',
     yaml:
       'grid:\n  width: 5\n  height: 5\ntypes:\n  A: { symbol: "A" }\nrules: {}\nclusters:\n  - id: c1\n    type: GHOST\n    areaPercent: 10\n',
     via: 'model',
-    note: 'spaec_manager: SpecValidationError «в clusters указан тип, которого нет в types» (spec_io._parse_clusters, docs/03 §5 п.3)',
+    note: 'space_manager: SpecValidationError «в clusters указан тип, которого нет в types» (spec_io._parse_clusters, docs/03 §5 п.3)',
   },
   {
     code: 'V-CLUST-ID',
     yaml:
       'grid:\n  width: 5\n  height: 5\ntypes:\n  A: { symbol: "A" }\nrules: {}\nclusters:\n  - id: c1\n    type: A\n    areaPercent: 10\n  - id: c1\n    type: A\n    areaPercent: 20\n',
     via: 'model',
-    note: 'spaec_manager: SpecValidationError «дублируется id экземпляра» (spec_io._parse_clusters, docs/03 §5 п.4)',
+    note: 'space_manager: SpecValidationError «дублируется id экземпляра» (spec_io._parse_clusters, docs/03 §5 п.4)',
   },
   {
     code: 'V-CLUST-SUM',
     yaml:
       'grid:\n  width: 5\n  height: 5\ntypes:\n  A: { symbol: "A" }\nrules: {}\nclusters:\n  - id: c1\n    type: A\n    areaPercent: 60\n  - id: c2\n    type: A\n    areaPercent: 50\n',
     via: 'model',
-    note: 'spaec_manager: SpecValidationError «сумма areaPercent превышает 100» (spec_io._parse_clusters, docs/03 §5 п.5)',
+    note: 'space_manager: SpecValidationError «сумма areaPercent превышает 100» (spec_io._parse_clusters, docs/03 §5 п.5)',
   },
   {
     code: 'V-ADJ-TYPE',
     yaml:
       'grid:\n  width: 5\n  height: 5\ntypes:\n  A: { symbol: "A" }\nrules:\n  adjacency:\n    forbidden:\n      - [A, GHOST]\nclusters: []\n',
     via: 'model',
-    note: 'spaec_manager: SpecValidationError «в adjacency указан неизвестный тип» (spec_io._parse_pairs, docs/03 §5 п.6)',
+    note: 'space_manager: SpecValidationError «в adjacency указан неизвестный тип» (spec_io._parse_pairs, docs/03 §5 п.6)',
   },
   {
     code: 'V-SHAPE',
     yaml:
       'grid:\n  width: 5\n  height: 5\ntypes:\n  A: { symbol: "A" }\nrules: {}\nclusters:\n  - id: c1\n    type: A\n    areaPercent: 10\n    shape: blob\n',
     via: 'parse',
-    note: 'spaec_manager: SpecValidationError «shape не входит в допустимый набор» (spec_io._parse_clusters, docs/03 §5 п.7)',
+    note: 'space_manager: SpecValidationError «shape не входит в допустимый набор» (spec_io._parse_clusters, docs/03 §5 п.7)',
   },
   {
     code: 'V-TOUCHALL-TYPE',
     yaml:
       'grid:\n  width: 5\n  height: 5\ntypes: {}\nrules:\n  touchAll: "yes"\nclusters: []\n',
     via: 'parse',
-    note: 'spaec_manager: SpecValidationError «touchAll не является boolean» (spec_io._parse_rules, docs/03 §5 п.8)',
+    note: 'space_manager: SpecValidationError «touchAll не является boolean» (spec_io._parse_rules, docs/03 §5 п.8)',
   },
 ];
 
-describe('Тест «двойников» ТЗ 05 §4: редактор отклоняет те же случаи, что и spaec_manager', () => {
+describe('Тест «двойников» ТЗ 05 §4: редактор отклоняет те же случаи, что и space_manager', () => {
   it.each(TWIN_CASES)('$code — фрагмент отклонён редактором ($via)', (tc) => {
     if (tc.via === 'parse') {
       // Ошибка на этапе парсинга YAML — до модели.

@@ -1,4 +1,4 @@
-# V-CLUST-TYPE: кластер ссылается на тип B, которого нет в types (spaec_manager: exit 2)
+# V-CLUST-TYPE: кластер ссылается на тип B, которого нет в types (space_manager: exit 2)
 grid:
   width: 10
   height: 10
