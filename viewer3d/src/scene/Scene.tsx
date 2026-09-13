@@ -105,6 +105,7 @@ export function Scene({ wallBoxes }: SceneProps) {
               W={report.width}
               H={report.height}
               S={state.params.scale}
+              unitLabel={state.params.unitLabel}
               wallHeight={state.params.wallHeight}
             />
           )}
@@ -301,7 +302,10 @@ function Walls({
     });
     mesh.count = boxes.length;
     mesh.instanceMatrix.needsUpdate = true;
-  }, [boxes, height]);
+    // hidden в зависимостях ОБЯЗАТЕЛЕН: при скрытии instancedMesh размонтируется,
+    // а при повторном показе монтируется НОВЫЙ объект с identity-матрицами — без
+    // повторного запуска эффекта стены остаются невидимыми (замечание 5).
+  }, [boxes, height, hidden]);
 
   if (hidden || boxes.length === 0) return null;
   // key по count: args InstancedMesh фиксирует количество при конструировании.
@@ -351,7 +355,9 @@ function BlockedCells({
     });
     mesh.count = cells.length;
     mesh.instanceMatrix.needsUpdate = true;
-  }, [cells, W, H, S, height]);
+    // visible в зависимостях по той же причине, что hidden у Walls: повторный
+    // монтаж instancedMesh требует пересета матриц (замечание 5).
+  }, [cells, W, H, S, height, visible]);
 
   if (!visible || cells.length === 0) return null;
   return (
@@ -363,7 +369,9 @@ function BlockedCells({
 }
 
 // ---------------------------------------------------------------------------
-// Подписи комнат (ТЗ 04 §8): drei Html в (cx, Hw·0.5, cz), только size ≥ 4 клеток
+// Подписи комнат (ТЗ 04 §8): drei Html в (cx, Hw·0.5, cz), только size ≥ 4 клеток.
+// Вторая строка — площадь (size · S², замечание 6 к единому сервису):
+// формат общий с таблицей КОМНАТЫ (ru.areaValue).
 // ---------------------------------------------------------------------------
 
 function RoomLabels({
@@ -371,14 +379,17 @@ function RoomLabels({
   W,
   H,
   S,
+  unitLabel,
   wallHeight,
 }: {
   rooms: Room[];
   W: number;
   H: number;
   S: number;
+  unitLabel: string;
   wallHeight: number;
 }) {
+  const areasScale = S * S; // площадь = size · S² (как в RoomsPanel)
   return (
     <>
       {rooms
@@ -394,7 +405,10 @@ function RoomLabels({
               zIndexRange={[100, 0]}
               style={{ pointerEvents: 'none' }} // не перехватывают клики (ТЗ 04 §8)
             >
-              <div className="room-label">{room.label}</div>
+              <div className="room-label">
+                {room.label}
+                <span className="room-label-area">{ru.areaValue(room.size * areasScale, unitLabel)}</span>
+              </div>
             </Html>
           );
         })}

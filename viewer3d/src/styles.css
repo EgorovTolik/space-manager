@@ -32,7 +32,8 @@ body {
   border-bottom: 1px solid #ddd;
 }
 
-/* docs-unified/04 §2.2: ссылка «← К проектам» в заголовке (менеджер, /) */
+/* docs-unified/04 §2.2 + замечание 1: самая левая кнопка заголовка —
+   зелёная «К проектам» (менеджер, /). */
 .app-header {
   display: flex;
   align-items: center;
@@ -41,8 +42,13 @@ body {
 
 .to-projects {
   font-size: 13px;
-  margin-left: auto;
+  font-weight: 600;
   margin-right: 12px;
+  padding: 5px 14px;
+  background: #2e7d32;
+  color: #fff;
+  border-radius: 4px;
+  text-decoration: none;
 }
 
 .app-body {
@@ -312,4 +318,12 @@ button.active {
   padding: 0 4px;
   font-size: 11px;
   white-space: nowrap;
+  text-align: center;
+}
+
+/* Площадь под меткой комнаты (замечание 6): вторая строка, поменьше. */
+.room-label-area {
+  display: block;
+  font-size: 10px;
+  color: #444;
 }

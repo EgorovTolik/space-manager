@@ -44,11 +44,14 @@ export async function mockViewerApi(
   projectName: string,
   results: MockResult[],
   extraProjects: string[] = [],
+  /** Slug основного проекта (по умолчанию = имя; замечание 2). */
+  projectSlug?: string,
 ): Promise<MockViewerApi> {
   const captured: MockViewerApi = { previews: [] };
-  const info = (n: string) => ({
-    id: `id-${n}`,
+  const info = (n: string, slug: string = n) => ({
+    id: `id-${slug}`,
     name: n,
+    slug, // в моках по умолчанию имя и slug совпадают (замечание 2)
     createdAt: '2026-09-13T12:00:00.000Z',
     updatedAt: '2026-09-13T12:00:00.000Z',
     latestResult: results[0]?.name ?? null,
@@ -66,7 +69,12 @@ export async function mockViewerApi(
     return route.fulfill({
       status: 200,
       contentType: 'application/json; charset=utf-8',
-      body: JSON.stringify({ projects: [info(projectName), ...extraProjects.map(info)] }),
+      body: JSON.stringify({
+        projects: [
+          info(projectName, projectSlug ?? projectName),
+          ...extraProjects.map((n) => info(n)),
+        ],
+      }),
     });
   });
 

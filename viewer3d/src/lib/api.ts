@@ -46,7 +46,8 @@ export async function getHealth(): Promise<HealthResponse> {
 /** Запись списка проектов (`GET /api/projects`, docs-unified/02 §6.2). */
 export interface ProjectInfo {
   id: string | null; // null — для corrupted-проектов
-  name: string;
+  name: string; // человекочитаемое имя (русские буквы, пробелы) — замечание 2
+  slug: string; // машинное имя: путь API/URL/ссылки
   createdAt: string | null;
   updatedAt: string | null;
   latestResult: string | null;

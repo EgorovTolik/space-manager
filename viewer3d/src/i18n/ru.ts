@@ -34,7 +34,8 @@ export const ru = {
   snapshotErrorBanner: (msg: string): string => `Не удалось сохранить предпросмотр: ${msg}`,
 
   // Заголовок (docs-unified/04 §2.2)
-  toProjects: '← К проектам',
+  // Замечание 1: без стрелки — зелёная кнопка в левом краю тулбара/заголовка.
+  toProjects: 'К проектам',
 
   // Заглушка сцены до загрузки (04 §1)
   scenePlaceholder: 'Выберите проект и файл результата (result-*.txt)',

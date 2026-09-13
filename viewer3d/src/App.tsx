@@ -75,11 +75,11 @@ export function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>{ru.appTitle}</h1>
-        {/* docs-unified/04 §2.2: заголовок — ссылка «← К проектам» (менеджер, /) */}
+        {/* Замечание 1: самая левая кнопка — зелёная «К проектам» (менеджер, /). */}
         <a href="/" className="to-projects">
           {ru.toProjects}
         </a>
+        <h1>{ru.appTitle}</h1>
       </header>
       <div className="app-body">
         <aside className="col-left">

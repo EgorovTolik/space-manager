@@ -68,6 +68,7 @@ function installApiMock(): void {
           {
             id: 'id-demo',
             name: PROJECT,
+            slug: PROJECT, // в моке имя и slug совпадают (замечание 2)
             createdAt: '2026-09-13T12:00:00.000Z',
             updatedAt: '2026-09-13T12:00:00.000Z',
             latestResult: NEW_RESULT,
@@ -131,11 +132,15 @@ async function waitLoaded(): Promise<void> {
 }
 
 describe('App + ProjectPanel + store (проектный режим, без WebGL)', () => {
-  it('до выбора проекта: заглушка сцены, селекторы, «← К проектам»', async () => {
+  it('до выбора проекта: заглушка сцены, селекторы, зелёная кнопка «К проектам» слева', async () => {
     renderApp();
     expect(screen.getByText(/Выберите проект и файл результата/)).toBeTruthy();
-    const toProjects = screen.getByRole('link', { name: '← К проектам' }) as HTMLAnchorElement;
+    // Замечание 1: самая левая кнопка заголовка — «К проектам» (менеджер, /).
+    const toProjects = screen.getByRole('link', { name: 'К проектам' }) as HTMLAnchorElement;
     expect(toProjects.getAttribute('href')).toBe('/');
+    expect(
+      toProjects.parentElement!.firstElementChild === toProjects,
+    ).toBeTruthy();
     // кнопка пресетов тулбара заблокирована до загрузки отчёта
     const iso = screen.getByRole('button', { name: 'Изометрия' }) as HTMLButtonElement;
     expect(iso.disabled).toBe(true);
@@ -250,5 +255,63 @@ describe('App + ProjectPanel + store (проектный режим, без WebG
     await selectProject();
     await waitLoaded();
     expect((screen.getByRole('button', { name: 'PNG' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('двухуровневое имя: селектор — человекочитаемое name, API/URL/статусы — slug (замечание 2)', async () => {
+    const NAME = 'Демо офис'; // русские буквы + пробел в display-имени
+    const SLUG = 'demo-office';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+        const url = String(input);
+        if (url === '/api/projects') {
+          return okJson({
+            projects: [
+              {
+                id: 'id-1',
+                name: NAME,
+                slug: SLUG,
+                createdAt: null,
+                updatedAt: null,
+                latestResult: NEW_RESULT,
+                sizeBytes: 1,
+                resultsCount: 1,
+                previewsCount: 0,
+                filesCount: 2,
+              },
+            ],
+          });
+        }
+        if (url === `/api/projects/${SLUG}/results`) {
+          return okJson({
+            results: [
+              { name: NEW_RESULT, sizeBytes: GOOD_REPORT.length, mtimeIso: '2026-09-13T12:00:00.000Z' },
+            ],
+          });
+        }
+        const m = /\/api\/projects\/([^/]+)\/file\?name=([^&]+)/.exec(url);
+        if (m !== null && m[1] === SLUG && m[2] === NEW_RESULT) return okText(GOOD_REPORT);
+        return notFound();
+      }),
+    );
+
+    renderApp();
+    const select = screen.getByRole('combobox', { name: 'Проект' }) as HTMLSelectElement;
+    await waitFor(() => expect(select.disabled).toBe(false), { timeout: 5000 });
+
+    // Опция: текст — человекочитаемое имя, value — slug.
+    const option = Array.from(select.options).find((o) => o.textContent === NAME);
+    expect(option?.value).toBe(SLUG);
+
+    fireEvent.change(select, { target: { value: SLUG } });
+    await waitFor(() => expect(screen.getByText('room1')).toBeTruthy(), { timeout: 5000 });
+
+    // Статус панели — человекочитаемое имя; URL — slug.
+    expect(
+      screen.getByText(new RegExp(`проект: ${NAME} · файл: ${NEW_RESULT}`), {
+        selector: '.panel-files li',
+      }),
+    ).toBeTruthy();
+    await waitFor(() => expect(window.location.search).toBe(`?project=${SLUG}&result=${NEW_RESULT}`));
   });
 });

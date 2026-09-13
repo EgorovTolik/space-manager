@@ -8,6 +8,9 @@
 //   REPORT_LOADED {fileName, projectName, resultName} + setSnapshotTarget (§2.3);
 // - URL-параметры ?project= / ?result= — автовыбор (§2.5), смена выбора —
 //   history.replaceState;
+// - двухуровневое имя проекта (замечание 2): в селекторе — человекочитаемое
+//   `name` (русские буквы, пробелы), а API/URL/снапшот используют `slug`;
+//   URL ?project= принимает и slug, и name.
 // - статус PNG-снапшота: подписка на onSnapshotResult (scene/snapshot.ts) —
 //   «Предпросмотр сохранён в проект: preview-<ts>.png» на 5 с / баннер ошибки (§2.4).
 // Баннер ошибок парсинга (parseError) — та же логика, что у FilePanel.
@@ -45,6 +48,7 @@ export function ProjectPanel() {
 
   // ── Состояние панели (локальное React-состояние — §2.3) ────────────────────
   const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
+  // Выбранный проект — его SLUG (машинный идентификатор); в UI показываем name.
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [results, setResults] = useState<ResultFile[] | null>(null);
   const [selectedResult, setSelectedResult] = useState<string | null>(null);
@@ -57,6 +61,12 @@ export function ProjectPanel() {
   // Защита от гонок: устаревшие асинхронные загрузки игнорируются.
   const loadSeqRef = useRef(0);
   const snapTimerRef = useRef<number | null>(null);
+  // Зеркало списка проектов для displayName-поиска: в URL-автозагрузке state
+  // ещё не обновился (setProjects и selectProject идут в одном then).
+  const projectsRef = useRef<ProjectInfo[] | null>(null);
+  useEffect(() => {
+    projectsRef.current = projects;
+  }, [projects]);
 
   // ── Статус PNG-снапшота (docs-unified/04 §2.4) ──────────────────────────────
   useEffect(() => {
@@ -78,13 +88,15 @@ export function ProjectPanel() {
   }, []);
 
   // ── Загрузка ревизии (§2.3 п.2) ─────────────────────────────────────────────
-  async function loadRevision(project: string, file: string): Promise<void> {
+  // projectSlug — для API/URL/снапшота; displayName — человекочитаемое имя в
+  // строках статуса (замечание 2).
+  async function loadRevision(projectSlug: string, file: string, displayName: string): Promise<void> {
     const seq = ++loadSeqRef.current;
     setLoading(true);
     setLoadError(null);
     setSnapshotStatus(null);
     try {
-      const text = await loadResultFile(project, file);
+      const text = await loadResultFile(projectSlug, file);
       if (seq !== loadSeqRef.current) return; // проект/ревизия уже переключены
       let parsed: ReturnType<typeof parseReport>;
       try {
@@ -103,12 +115,12 @@ export function ProjectPanel() {
         type: 'REPORT_LOADED',
         report: parsed,
         fileName: file,
-        projectName: project,
+        projectName: displayName, // статус — человекочитаемое имя (замечание 2)
         resultName: file,
       });
-      // Цель снапшота — выбранный проект (§2.2/§2.4): только после успешной загрузки.
-      setSnapshotTarget({ projectName: project });
-      syncUrl(project, file); // ?project=&result= отражают текущую ревизию (§2.5)
+      // Цель снапшота — выбранный проект (§2.2/§2.4): путь API — по SLUG.
+      setSnapshotTarget({ projectName: projectSlug });
+      syncUrl(projectSlug, file); // ?project=&result= отражают текущую ревизию (§2.5)
     } catch (e) {
       if (seq !== loadSeqRef.current) return;
       setLoadError(ru.loadErrorBanner(e instanceof Error ? e.message : String(e)));
@@ -119,17 +131,19 @@ export function ProjectPanel() {
   }
 
   // ── Выбор проекта (§2.3 п.1): список ревизий + автовыбор ────────────────────
-  async function selectProject(name: string, urlResult?: string | null): Promise<void> {
+  async function selectProject(slug: string, urlResult?: string | null): Promise<void> {
     const seq = ++loadSeqRef.current;
-    setSelectedProject(name);
+    setSelectedProject(slug);
     setProjectNotFound(null);
     setResults(null);
     setSelectedResult(null);
     setLoading(true);
     setLoadError(null);
-    syncUrl(name, null);
+    syncUrl(slug, null);
+    const displayName =
+      (projectsRef.current ?? []).find((p) => p.slug === slug)?.name ?? slug;
     try {
-      const list = await listResults(name);
+      const list = await listResults(slug);
       if (seq !== loadSeqRef.current) return;
       setResults(list);
       if (list.length === 0) {
@@ -141,7 +155,7 @@ export function ProjectPanel() {
       const auto =
         wanted !== null && list.some((r) => r.name === wanted) ? wanted : list[0].name;
       setSelectedResult(auto);
-      await loadRevision(name, auto);
+      await loadRevision(slug, auto, displayName);
     } catch (e) {
       if (seq !== loadSeqRef.current) return;
       setLoadError(ru.loadErrorBanner(e instanceof Error ? e.message : String(e)));
@@ -166,13 +180,17 @@ export function ProjectPanel() {
     listProjects()
       .then((list) => {
         if (cancelled) return;
+        projectsRef.current = list; // до selectProject — displayName-поиск (§2.5)
         setProjects(list);
         const params = new URLSearchParams(window.location.search);
         const urlProject = params.get('project');
         if (urlProject !== null && urlProject.length > 0) {
-          if (list.some((p) => p.name === urlProject)) {
-            setSelectedProject(urlProject);
-            void selectProject(urlProject, params.get('result'));
+          // URL-параметр несёт slug (ссылки редактора/менеджера); name — фолбэк.
+          const match =
+            list.find((p) => p.slug === urlProject) ?? list.find((p) => p.name === urlProject);
+          if (match !== undefined) {
+            setSelectedProject(match.slug);
+            void selectProject(match.slug, params.get('result'));
           } else {
             setProjectNotFound(urlProject);
           }
@@ -190,16 +208,18 @@ export function ProjectPanel() {
   }, []);
 
   function onProjectChange(e: ChangeEvent<HTMLSelectElement>): void {
-    const name = e.target.value;
-    if (name.length === 0) return;
-    void selectProject(name, null);
+    const slug = e.target.value; // в селекторе value — slug (замечание 2)
+    if (slug.length === 0) return;
+    void selectProject(slug, null);
   }
 
   function onResultChange(e: ChangeEvent<HTMLSelectElement>): void {
     const file = e.target.value;
     if (file.length === 0 || selectedProject === null) return;
     setSelectedResult(file);
-    void loadRevision(selectedProject, file);
+    const displayName =
+      (projectsRef.current ?? []).find((p) => p.slug === selectedProject)?.name ?? selectedProject;
+    void loadRevision(selectedProject, file, displayName);
   }
 
   // ── Статусы ──────────────────────────────────────────────────────────────────
@@ -228,7 +248,7 @@ export function ProjectPanel() {
       >
         <option value="">{ru.projectPlaceholder}</option>
         {(projects ?? []).map((p) => (
-          <option key={p.name} value={p.name}>
+          <option key={p.slug} value={p.slug}>
             {p.name}
           </option>
         ))}
