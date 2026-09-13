@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clustersPercentSum,
+  freePercent,
   formatNumber,
   isValidTypeId,
   maskDownloadName,
@@ -14,7 +15,7 @@ import {
   specDownloadName,
   symbolError,
 } from '../../src/lib/fileUtils';
-import type { ValidationError } from '../../src/lib/types';
+import type { ClusterEntry, ValidationError } from '../../src/lib/types';
 
 describe('specDownloadName (ТЗ 02 §6)', () => {
   it('использует имя исходно загруженного файла', () => {
@@ -36,6 +37,33 @@ describe('maskDownloadName (ТЗ 02 §6: поле спеки → исходно�
   it('без всего — дефолтное имя', () => {
     expect(maskDownloadName(null, null, 'blocked.txt')).toBe('blocked.txt');
     expect(maskDownloadName('', '', 'preset.txt')).toBe('preset.txt');
+  });
+});
+
+describe('freePercent — hint свободной доли в форме кластера', () => {
+  const clusters: ClusterEntry[] = [
+    { id: 'a', type: 'T', areaPercent: 26, shape: 'free' },
+    { id: 'b', type: 'T', areaPercent: 15, shape: 'free' },
+    { id: 'c', type: 'T', areaPercent: 10, shape: 'circle' },
+  ];
+
+  it('новый кластер (excludeId=null): 100 − сумма всех; пустой ввод формы — без вычета', () => {
+    expect(freePercent(clusters, null, null)).toBe(49);
+  });
+
+  it('редактирование: собственная доля НЕ вычитается из занятого', () => {
+    // b=15 редактируем: занято другими = 26+10 → свободно 64 независимо от saved-доли b.
+    expect(freePercent(clusters, 'b', null)).toBe(64);
+  });
+
+  it('live: корректный ввод формы вычитается дополнительно', () => {
+    expect(freePercent(clusters, 'b', 20)).toBe(44); // 100 − 36 − 20
+    expect(freePercent(clusters, null, 55)).toBe(-6); // 100 − 51 − 55 → отрицательное как есть
+  });
+
+  it('некорректный ввод (null) — без вычета текущего', () => {
+    expect(freePercent(clusters, 'b', null)).toBe(64);
+    expect(freePercent([], null, null)).toBe(100);
   });
 });
 

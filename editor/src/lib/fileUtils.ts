@@ -48,6 +48,24 @@ export function formatNumber(v: number): string {
   return String(Math.round(v * 100) / 100);
 }
 
+/**
+ * Свободная доля площади для hint формы кластера (ТЗ 04 §4):
+ * `100 − сумма areaPercent всех остальных кластеров` (`excludeId` — редактируемый,
+ * его сохранённая доля НЕ вычитается) − текущий корректный ввод формы (`current`,
+ * null при пустом/некорректном вводе). Может быть отрицательной (показывается как есть).
+ */
+export function freePercent(
+  clusters: ClusterEntry[],
+  excludeId: string | null,
+  current: number | null,
+): number {
+  let sum = current ?? 0;
+  for (const c of clusters) {
+    if (c.id !== excludeId) sum += c.areaPercent;
+  }
+  return Math.round((100 - sum) * 100) / 100;
+}
+
 // ── Проверки форм ввода (ТЗ 05 §2.4) ────────────────────────────────────────────
 
 const TYPE_ID_RE = /^[A-Za-z][A-Za-z0-9_]*$/;

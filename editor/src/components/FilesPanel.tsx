@@ -90,6 +90,8 @@ export default function ProjectFilesPanel(): JSX.Element {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
+  // Seed генератора: параметр запуска (не спека) — пустой ввод = не передаётся (0).
+  const [seedText, setSeedText] = useState('');
   const [generating, setGenerating] = useState(false);
   const [genResult, setGenResult] = useState<GenerateResult | null>(null);
   const [genError, setGenError] = useState<{ message: string; input: boolean } | null>(null);
@@ -404,8 +406,19 @@ export default function ProjectFilesPanel(): JSX.Element {
         const ok = await saveToProject();
         if (!ok) return; // ошибка сохранения прерывает генерацию
       }
+      // Seed — опциональный integer ≥ 0; пустой ввод = не передаётся (DEFAULT_SEED солвера).
+      let seed: number | undefined;
+      const tSeed = seedText.trim();
+      if (tSeed !== '') {
+        const n = Number(tSeed);
+        if (!Number.isInteger(n) || n < 0) {
+          setGenError({ message: ru.project.seedInvalid, input: false });
+          return;
+        }
+        seed = n;
+      }
       // 2. POST generate (серверный таймаут 60 с вернёт 504 — клиентский не нужен).
-      const res = await generatePlacement(selected);
+      const res = await generatePlacement(selected, seed === undefined ? undefined : { seed });
       setGenResult(res);
       void refreshResults(selected); // новая ревизия — наверху списка (замечание 4)
     } catch (e) {
@@ -601,7 +614,19 @@ export default function ProjectFilesPanel(): JSX.Element {
           >
             {generating ? ru.project.generating : ru.project.generateBtn}
           </button>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#555' }}>
+            {ru.project.seedLabel}
+            <input
+              value={seedText}
+              onChange={(e) => setSeedText(e.target.value)}
+              disabled={!canSave || generating}
+              placeholder={ru.project.seedPlaceholder}
+              aria-label={ru.project.seedLabel}
+              style={{ width: 90, marginTop: 0 }}
+            />
+          </label>
         </div>
+        <div style={{ color: '#888', fontSize: 11, marginTop: 2 }}>{ru.project.seedHint}</div>
 
         {savedAt && !anyDirty && (
           <div style={statusStyle}>

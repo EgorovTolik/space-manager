@@ -16,6 +16,8 @@ export interface CapturedApi {
   puts: Record<string, string>[];
   /** Последовательность вызовов: 'put' | 'generate' (порядок — для проверки автосохранения). */
   events: ('put' | 'generate')[];
+  /** Тела POST …/generate (порядок вызовов) — напр. {seed} (ST-3). */
+  generateBodies: unknown[];
 }
 
 export interface MockOpts {
@@ -34,7 +36,7 @@ export async function mockProject(
   files: MockFiles,
   opts: MockOpts = {},
 ): Promise<CapturedApi> {
-  const captured: CapturedApi = { puts: [], events: [] };
+  const captured: CapturedApi = { puts: [], events: [], generateBodies: [] };
   // Историю result-* храним в замыкании: успешная генерация добавляет ревизию наверх.
   let resultsList: { name: string; mtimeIso: string }[] = [...(opts.results ?? [])];
   const info = (n: string) => ({
@@ -92,6 +94,7 @@ export async function mockProject(
   await page.route(/\/api\/projects\/[^/]+\/generate/, (route) => {
     const i = captured.events.filter((e) => e === 'generate').length;
     captured.events.push('generate');
+    captured.generateBodies.push(route.request().postDataJSON() ?? {});
     const resp = opts.generate
       ? opts.generate(i)
       : { status: 200, body: { resultFile: RESULT_FILE, exitCode: 0, feasible: true, report: REPORT_OK } };

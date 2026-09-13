@@ -11,7 +11,7 @@ import { ru } from '../i18n/ru';
 import { useEditor } from '../state/editorStore';
 import type { ClusterEntry, ShapeKind } from '../lib/types';
 import { SUM_EPSILON } from '../lib/validation';
-import { clustersPercentSum, formatNumber, parseAreaPercent } from '../lib/fileUtils';
+import { clustersPercentSum, formatNumber, freePercent, parseAreaPercent } from '../lib/fileUtils';
 
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' };
 const btnStyle: CSSProperties = { cursor: 'pointer', padding: '2px 6px' };
@@ -71,6 +71,7 @@ export default function ClustersPanel(): JSX.Element {
           initial={editing === 'new' ? null : editing}
           typeIds={typeIds}
           existingIds={spec.clusters.map((c) => c.id)}
+          allClusters={spec.clusters}
           onSave={(entry, isNew) => {
             if (isNew) dispatch({ type: 'CLUSTER_ADD', cluster: entry });
             else dispatch({ type: 'CLUSTER_UPDATE', id: entry.id, patch: { type: entry.type, areaPercent: entry.areaPercent, shape: entry.shape } });
@@ -123,10 +124,11 @@ function ClusterForm(props: {
   initial: ClusterEntry | null; // null — новый кластер
   typeIds: string[];
   existingIds: string[];
+  allClusters: ClusterEntry[]; // все кластеры спеки (для hint свободной доли)
   onSave: (entry: ClusterEntry, isNew: boolean) => void;
   onCancel: () => void;
 }): JSX.Element {
-  const { initial, typeIds, existingIds, onSave, onCancel } = props;
+  const { initial, typeIds, existingIds, allClusters, onSave, onCancel } = props;
   const [id, setId] = useState(initial ? initial.id : '');
   const [type, setType] = useState(initial ? initial.type : (typeIds[0] ?? ''));
   const [percentText, setPercentText] = useState(initial ? String(initial.areaPercent) : '');
@@ -156,6 +158,11 @@ function ClusterForm(props: {
 
   const selectedHint = SHAPES.find((s) => s.value === shape)?.hint;
 
+  // Hint свободной доли: 100 − другие кластеры − текущий ввод формы (live при вводе;
+  // некорректный/пустой ввод — без вычета текущего). Отрицательное значение показываем
+  // как есть цветом ошибки («Сумма долей» отдельно жалуется при >100).
+  const free = freePercent(allClusters, initial ? initial.id : null, parseAreaPercent(percentText));
+
   return (
     <div style={modalStyle}>
       <strong>{initial ? ru.clusters.editTitle : ru.clusters.addTitle}</strong>
@@ -182,6 +189,9 @@ function ClusterForm(props: {
         <span style={labelStyle}>{ru.clusters.percentLabel} *</span>
         <input value={percentText} onChange={(e) => setPercentText(e.target.value)} style={{ width: 120, marginTop: 2 }} />
       </label>
+      <div style={{ fontSize: 11, color: free < 0 ? '#c62828' : '#888', marginTop: 2 }}>
+        {ru.clusters.freeHint.replace('{free}', formatNumber(free))}
+      </div>
 
       <div style={fieldStyle}>
         <span style={labelStyle}>{ru.clusters.shapeLabel} *</span>

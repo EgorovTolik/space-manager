@@ -68,4 +68,40 @@ test.describe('CRUD кластеров и правил (docs-unified/06 §3.4)',
     expect(model.clusters.map((c) => c.id)).toEqual(['room1', 'room2', 'corridor1']);
     expect(Object.keys(cap.puts[0]).sort()).toEqual(['spec.yaml']);
   });
+
+  test('hint свободной площади у areaPercent: live-пересчёт, свойство «не вычитать себя» (ST-3)', async ({ page }) => {
+    await mockProject(page, 'demo', { 'spec.yaml': SPEC_50X50 }); // кластеры 30 + 15 + 6 = 51
+    await page.goto('/');
+    await selectProject(page, 'demo');
+
+    const clustersPanel = page.locator('section.panel', { has: page.getByRole('heading', { name: 'Кластеры' }) });
+
+    // ── Форма добавления: пусто = 100 − 51; ввод 10 → 39 ───────────────────────
+    await clustersPanel.getByRole('button', { name: '＋ Добавить' }).click();
+    const form = page.locator('div', { has: page.getByText('Добавить кластер', { exact: true }) }).last();
+    await expect(form.getByText('Свободна ещё 49 % доступной площади.')).toBeVisible();
+    await form.locator('input').nth(1).fill('10'); // areaPercent
+    await expect(form.getByText('Свободна ещё 39 % доступной площади.')).toBeVisible();
+    // Некорректный ввод — без вычета текущего (как при пустом).
+    await form.locator('input').nth(1).fill('abc');
+    await expect(form.getByText('Свободна ещё 49 % доступной площади.')).toBeVisible();
+    // Отрицательное значение показывается как есть: 100 − 51 − 60 = −11.
+    await form.locator('input').nth(1).fill('60');
+    await expect(form.getByText('Свободна ещё -11 % доступной площади.')).toBeVisible();
+
+    // ── Форма редактирования room2 (доля 15): сохранённая доля НЕ вычитается, но
+    // текущий ввод формы («15» — корректен) учитывается: 100 − 36 − 15 = 49 ──
+    await form.getByRole('button', { name: 'Отмена' }).click();
+    const row = clustersPanel.locator('div', { has: page.getByText('room2', { exact: true }) }).last();
+    await row.locator('button[title="Редактировать"]').click();
+    const editForm = page.locator('div', { has: page.getByText('Редактировать кластер', { exact: true }) }).last();
+    await expect(editForm.getByText('Свободна ещё 49 % доступной площади.')).toBeVisible();
+    // Ввод 20 → 100 − 36 − 20 = 44.
+    await editForm.locator('input').nth(1).fill('20');
+    await expect(editForm.getByText('Свободна ещё 44 % доступной площади.')).toBeVisible();
+    // Пустой (некорректный) ввод — без вычета текущего: «свободно относительно
+    // остальных» = 100 − 36 = 64 (собственная сохранённая доля не вычитается).
+    await editForm.locator('input').nth(1).fill('');
+    await expect(editForm.getByText('Свободна ещё 64 % доступной площади.')).toBeVisible();
+  });
 });

@@ -109,7 +109,9 @@ export async function listResults(slug: string): Promise<ResultInfo[]> {
   return body.results;
 }
 
-/** Результат генерации (`POST …/<p>/generate`, 02 §6.10): exit 0 и 1 — HTTP 200. */
+/** Результат генерации (`POST …/<p>/generate`, 02 §6.10): exit 0 и 1 — HTTP 200.
+ * `opts.seed` — опциональный integer ≥ 0 (параметр запуска солвера `--seed`; не
+ * сохраняется в спеку). Не задан → тело `{}` (детерминированный DEFAULT_SEED). */
 export interface GenerateResult {
   resultFile: string;
   exitCode: number;
@@ -117,11 +119,15 @@ export interface GenerateResult {
   report: string;
 }
 
-export async function generatePlacement(name: string): Promise<GenerateResult> {
+export async function generatePlacement(
+  name: string,
+  opts?: { seed?: number },
+): Promise<GenerateResult> {
+  const body = opts?.seed === undefined ? {} : { seed: opts.seed };
   const res = await fetch(`/api/projects/${encodeURIComponent(name)}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: '{}',
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw await toApiError(res);
   return (await res.json()) as GenerateResult;

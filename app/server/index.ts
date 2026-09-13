@@ -354,6 +354,21 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
     asyncH(async (req, res) => {
       const slug = req.params.p;
       const dir = await requireProjectDir(cfg.workspaceDir, slug);
+
+      // Опциональный seed (integer ≥ 0): не задан → флаг не передаётся (детерминированный
+      // DEFAULT_SEED солвера); некорректное значение — 422 UNPROCESSABLE (паттерн PATCH rename).
+      const body = req.body as { seed?: unknown } | undefined;
+      let seedArgs: string[] = [];
+      if (body !== null && typeof body === 'object' && !Array.isArray(body)) {
+        const { seed } = body;
+        if (seed !== undefined) {
+          if (typeof seed !== 'number' || !Number.isInteger(seed) || seed < 0) {
+            throw ApiError.unprocessable('Параметр seed должен быть целым числом ≥ 0');
+          }
+          seedArgs = ['--seed', String(seed)];
+        }
+      }
+
       // readMeta до очереди: corrupted-проект нельзя генерировать (мутация latestResult).
       await readMeta(dir);
 
@@ -363,7 +378,7 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
         const outPath = path.join(dir, resultName);
         const run = await runSolver(
           cfg.pythonBin,
-          ['-m', 'space_manager', 'place', specPath, '--out', outPath],
+          ['-m', 'space_manager', 'place', specPath, '--out', outPath, ...seedArgs],
           { cwd: dir, timeoutMs: cfg.timeoutMs },
         );
 

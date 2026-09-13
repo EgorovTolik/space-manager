@@ -124,6 +124,61 @@ describe('Генерация (stub-python, ТЗ 05 §3.3)', () => {
     expect(b1.resultFile).not.toBe(b2.resultFile);
   });
 
+  it('seed: не задан → флага --seed в argv НЕТ (поведение как до ST-3)', async () => {
+    await ctx.setStub({ exit: 0 });
+    // Пустое тело и явно seed: undefined — оба = флаг не передаётся.
+    const r1 = await api(ctx, 'POST', '/api/projects/gen/generate', {});
+    expect(r1.status).toBe(200);
+    let args = ctx.readStubArgs();
+    expect(args).toEqual([
+      '-m',
+      'space_manager',
+      'place',
+      path.join(dir(), 'spec.yaml'),
+      '--out',
+      path.join(dir(), (r1.json as { resultFile: string }).resultFile),
+    ]);
+
+    const r2 = await api(ctx, 'POST', '/api/projects/gen/generate', { seed: undefined });
+    expect(r2.status).toBe(200);
+    args = ctx.readStubArgs();
+    expect(args).not.toContain('--seed');
+  });
+
+  it('seed=42 → `--seed 42` в argv солвера (строкой); seed=0 → `--seed 0`', async () => {
+    await ctx.setStub({ exit: 0 });
+    const r1 = await api(ctx, 'POST', '/api/projects/gen/generate', { seed: 42 });
+    expect(r1.status).toBe(200);
+    expect(ctx.readStubArgs()).toEqual([
+      '-m',
+      'space_manager',
+      'place',
+      path.join(dir(), 'spec.yaml'),
+      '--out',
+      path.join(dir(), (r1.json as { resultFile: string }).resultFile),
+      '--seed',
+      '42',
+    ]);
+
+    // 0 — корректное значение (явно задаётся, флаг передаётся).
+    const r2 = await api(ctx, 'POST', '/api/projects/gen/generate', { seed: 0 });
+    expect(r2.status).toBe(200);
+    expect(ctx.readStubArgs()).toEqual(expect.arrayContaining(['--seed', '0']));
+  });
+
+  it('некорректный seed (отрицательное / дробное / не число) → 422 UNPROCESSABLE; солвер не запускается', async () => {
+    for (const seed of [-1, 1.5, 'abc']) {
+      await ctx.setStub({ exit: 0 });
+      const res = await api(ctx, 'POST', '/api/projects/gen/generate', { seed });
+      expect(res.status).toBe(422);
+      expect((res.json as { error: string }).error).toBe('UNPROCESSABLE');
+      expect((res.json as { message: string }).message).toContain('seed');
+    }
+    // Валидация до spawn: файл результата не создан, аргументы stub не менялись.
+    const results = fs.readdirSync(dir()).filter((n) => n.startsWith('result-'));
+    expect(results).toEqual([]);
+  });
+
   it('нет python-бинаря → 500 SOLVER_FAILED', async () => {
     const noPy = await startServer({ pythonBin: '/nonexistent/python' });
     try {

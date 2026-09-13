@@ -15,6 +15,7 @@ import {
   selectProject,
 } from './helpers';
 import { EXAMPLES, REPORT_INFEASIBLE, RESULT_FILE, SPEC_10X10_MASKED } from './fixtures';
+import { ru } from '../../src/i18n/ru';
 
 const FILES = {
   'spec.yaml': SPEC_10X10_MASKED,
@@ -43,6 +44,30 @@ test.describe('Генерация размещения (docs-unified/04 §1.6)',
     // Details-блок отчёта солвера.
     await page.getByText('Отчёт солвера').click();
     await expect(page.locator('pre').getByText(/== ТАБЛИЦА/)).toBeVisible();
+  });
+
+  test('seed: ввод передаётся в тело POST; пустой seed → тело {} (ST-3)', async ({ page }) => {
+    const cap = await mockProject(page, 'demo', FILES);
+    await page.goto('/');
+    await selectProject(page, 'demo');
+    await expect(page.getByText('Ошибок валидации нет')).toBeVisible();
+
+    // Пустой seed — флаг не передаётся (тело {}). 
+    await generateBtn(page).click();
+    await expect(page.getByText(`Размещение найдено: ${RESULT_FILE}`)).toBeVisible({ timeout: 10_000 });
+    expect(cap.generateBodies[0]).toEqual({});
+
+    // Введённый seed — в теле POST как число (genResult — единое состояние: ждём второй вызов).
+    await page.getByRole('textbox', { name: 'Seed' }).fill('7');
+    await generateBtn(page).click();
+    await expect.poll(() => cap.events.filter((e) => e === 'generate').length, { timeout: 10_000 }).toBe(2);
+    expect(cap.generateBodies[1]).toEqual({ seed: 7 });
+
+    // Некорректный seed — локальная ошибка, POST не идёт.
+    await page.getByRole('textbox', { name: 'Seed' }).fill('abc');
+    await generateBtn(page).click();
+    await expect(page.getByText(ru.project.seedInvalid)).toBeVisible();
+    expect(cap.generateBodies.length).toBe(2);
   });
 
   test('dirty: автосохранение до POST (PUT → generate), изменение попало в PUT', async ({ page }) => {
