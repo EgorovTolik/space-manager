@@ -14,6 +14,23 @@ import { createProjectQueue, runSolver } from './generate.js';
 import { loadLlmConfig } from './llm/config.js';
 import { fetchAllProviderModels } from './llm/models.js';
 import {
+  createLlmSessionController,
+  runLlmSession,
+  statusViewFromRecord,
+} from './llm/agent.js';
+import {
+  DEFAULT_LLM_LIMITS,
+  type LlmLimits,
+} from './llm/actions.js';
+import {
+  listJournals,
+  nextSessionId,
+  readJournalRecord,
+  SESSION_ID_RE,
+  writeJournalRecord,
+  type LlmJournalRecord,
+} from './llm/journal.js';
+import {
   archiveFileName,
   buildProjectArchive,
   createProject,
@@ -170,10 +187,20 @@ function mountSpa(
 // createApp — сборка приложения (без listen)
 // ---------------------------------------------------------------------------
 
+export interface ActiveLlmSession {
+  /** id сессии (пусто до записи стартового журнала — резервация против гонок). */
+  id: string;
+  record: LlmJournalRecord | null;
+  controller: ReturnType<typeof createLlmSessionController>;
+}
+
 export async function createApp(opts: AppOptions = {}): Promise<express.Express> {
   const cfg = resolveConfig(opts);
   await ensureWorkspace(cfg.workspaceDir);
   const queue = createProjectQueue();
+  // Одна активная LLM-сессия на проект (05 §6); запись в карту — синхронно
+  // сразу после проверки, без await между проверкой и установкой (нет гонки).
+  const llmActive = new Map<string, ActiveLlmSession>();
   const pkg = JSON.parse(
     fs.readFileSync(path.join(appDir, 'package.json'), 'utf8'),
   ) as { version: string };
@@ -533,6 +560,196 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
           })),
         })),
       });
+    }),
+  );
+
+  // --- LLM-агентные прогоны (ТЗ docs-llm/06 §1.2–§1.5) -------------------------
+
+  // Валидация тела llm-generate: {prompt, modelId, limits?} → дефолтные лимиты.
+  function validateLlmGenerateBody(
+    body: unknown,
+  ): { prompt: string; modelId: string; providerId: string; limits: LlmLimits } {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      throw ApiError.llmInvalidBody('Тело запроса должно быть объектом { prompt, modelId, limits? }');
+    }
+    const obj = body as Record<string, unknown>;
+    if (typeof obj.prompt !== 'string' || obj.prompt.trim().length < 1 || obj.prompt.length > 4000) {
+      throw ApiError.llmInvalidBody('Поле prompt — непустая строка (1..4000 символов)');
+    }
+    if (typeof obj.modelId !== 'string' || !obj.modelId.includes('/')) {
+      throw ApiError.llmInvalidBody('Поле modelId — строка вида "<provider>/<modelId>"');
+    }
+    const providerId = obj.modelId.slice(0, obj.modelId.indexOf('/'));
+
+    let limits: LlmLimits = { ...DEFAULT_LLM_LIMITS };
+    if (obj.limits !== undefined) {
+      if (typeof obj.limits !== 'object' || obj.limits === null || Array.isArray(obj.limits)) {
+        throw ApiError.llmInvalidBody('Поле limits — объект { maxIterations?, timeBudgetPerRun?, totalTimeoutSec? }');
+      }
+      const raw = obj.limits as Record<string, unknown>;
+      for (const key of Object.keys(raw)) {
+        if (!Object.prototype.hasOwnProperty.call(DEFAULT_LLM_LIMITS, key)) {
+          throw ApiError.llmInvalidBody(`Неизвестный лимит «${key}»`);
+        }
+      }
+      if (raw.maxIterations !== undefined) {
+        if (typeof raw.maxIterations !== 'number' || !Number.isInteger(raw.maxIterations) || raw.maxIterations < 1 || raw.maxIterations > 50) {
+          throw ApiError.llmInvalidBody('Лимит maxIterations — целое число от 1 до 50');
+        }
+        limits.maxIterations = raw.maxIterations;
+      }
+      if (raw.timeBudgetPerRun !== undefined) {
+        if (typeof raw.timeBudgetPerRun !== 'number' || !Number.isFinite(raw.timeBudgetPerRun) || raw.timeBudgetPerRun <= 0) {
+          throw ApiError.llmInvalidBody('Лимит timeBudgetPerRun — число > 0 (секунды)');
+        }
+        limits.timeBudgetPerRun = raw.timeBudgetPerRun;
+      }
+      if (raw.totalTimeoutSec !== undefined) {
+        if (typeof raw.totalTimeoutSec !== 'number' || !Number.isFinite(raw.totalTimeoutSec) || raw.totalTimeoutSec <= 0) {
+          throw ApiError.llmInvalidBody('Лимит totalTimeoutSec — число > 0 (секунды)');
+        }
+        limits.totalTimeoutSec = raw.totalTimeoutSec;
+      }
+    }
+    return { prompt: obj.prompt.trim(), modelId: obj.modelId, providerId, limits };
+  }
+
+  // 1.2 старт прогона: 202 {sessionId}; сессия выполняется асинхронно в очереди проекта.
+  app.post(
+    '/api/projects/:p/llm-generate',
+    json,
+    asyncH(async (req, res) => {
+      const slug = req.params.p;
+      const { prompt, modelId, providerId, limits } = validateLlmGenerateBody(req.body);
+      const dir = await requireProjectDir(cfg.workspaceDir, slug);
+
+      const loaded = await loadLlmConfig();
+      if (!loaded.ok) throw ApiError.llmNotConfigured();
+      const provider = loaded.config.providers[providerId];
+      if (provider === undefined) throw ApiError.llmUnknownModel(providerId);
+
+      // readMeta до старта: corrupted-проект нельзя использовать (мутация latestResult).
+      await readMeta(dir);
+
+      if (llmActive.has(slug)) throw ApiError.llmSessionActive();
+      const controller = createLlmSessionController();
+      const entry: ActiveLlmSession = { id: '', record: null, controller };
+      llmActive.set(slug, entry); // резервация СИНХРОННО — вторая попытка получит 409
+
+      const sessionId = await nextSessionId(dir, cfg.now);
+      const initialRecord: LlmJournalRecord = {
+        prompt,
+        modelId,
+        limits,
+        iterations: [],
+        status: 'running',
+        startedAt: cfg.now().toISOString(),
+        finishedAt: null,
+      };
+      await writeJournalRecord(dir, sessionId, initialRecord);
+      entry.record = initialRecord;
+      entry.id = sessionId;
+
+      res.status(202).json({ sessionId });
+
+      // Сессия — в очереди проекта (06 §1); ответ уже отправлен.
+      void queue.enqueue(slug, async () => {
+        try {
+          await runLlmSession({
+            projectDir: dir,
+            sessionId,
+            initialRecord,
+            prompt,
+            modelId,
+            provider,
+            limits,
+            pythonBin: cfg.pythonBin,
+            now: cfg.now,
+            validateTimeoutMs: cfg.timeoutMs,
+            controller,
+          });
+        } catch {
+          // runLlmSession сам фиксирует сбой в журнале; страховка от unhandled rejection.
+        } finally {
+          const cur = llmActive.get(slug);
+          if (cur !== undefined && cur.id === sessionId) llmActive.delete(slug);
+        }
+      });
+    }),
+  );
+
+  // 1.3 статус прогона: живое состояние сессии или файл журнала (опрос ~1.5 c).
+  app.get(
+    '/api/projects/:p/llm-status',
+    asyncH(async (req, res) => {
+      const dir = await requireProjectDir(cfg.workspaceDir, req.params.p);
+      const qSession = req.query.session;
+      if (typeof qSession !== 'string' || qSession.length === 0) {
+        throw ApiError.llmInvalidBody('Не указан параметр session');
+      }
+      const live = llmActive.get(req.params.p);
+      let record = live !== undefined && live.id === qSession ? live.record : null;
+      if (record === null) record = await readJournalRecord(dir, qSession);
+      if (record === null) throw ApiError.llmNoSession(qSession);
+      res.json(statusViewFromRecord(record));
+    }),
+  );
+
+  // 1.4 остановка: флаг + SIGKILL child-процесса текущего запуска (05 §4).
+  app.post(
+    '/api/projects/:p/llm-stop',
+    asyncH(async (req, res) => {
+      const dir = await requireProjectDir(cfg.workspaceDir, req.params.p);
+      const live = llmActive.get(req.params.p);
+      if (live !== undefined && live.id !== '' && live.record !== null) {
+        // Терминальная запись ещё не убрана из реестра (окно после финализации).
+        if (live.record.status !== 'running') {
+          res.json({ state: live.record.status });
+          return;
+        }
+        live.controller.stop();
+        res.json({ state: 'stopping' });
+        return;
+      }
+      // Активной сессии нет: терминальная последняя → её состояние, иначе 404.
+      const sessions = await listJournals(dir);
+      const last = sessions[0];
+      if (last !== undefined && last.record.status !== 'running') {
+        res.json({ state: last.record.status });
+        return;
+      }
+      throw ApiError.llmNoSession('активная сессия отсутствует');
+    }),
+  );
+
+  // 1.5 список журналов прогонов (newest-first).
+  app.get(
+    '/api/projects/:p/llm-sessions',
+    asyncH(async (req, res) => {
+      const dir = await requireProjectDir(cfg.workspaceDir, req.params.p);
+      const sessions = await listJournals(dir);
+      res.json({
+        sessions: sessions.map(({ sessionId, record }) => ({
+          sessionId,
+          status: record.status,
+          modelId: record.modelId,
+          promptPreview: record.prompt.slice(0, 120),
+          startedAt: record.startedAt,
+          finishedAt: record.finishedAt,
+        })),
+      });
+    }),
+  );
+
+  // 1.5 полный журнал сессии.
+  app.get(
+    '/api/projects/:p/llm-sessions/:id',
+    asyncH(async (req, res) => {
+      const dir = await requireProjectDir(cfg.workspaceDir, req.params.p);
+      if (!SESSION_ID_RE.test(req.params.id)) throw ApiError.llmNoSession(req.params.id);
+      const record = await readJournalRecord(dir, req.params.id);
+      if (record === null) throw ApiError.llmNoSession(req.params.id);
+      res.json(record);
     }),
   );
 

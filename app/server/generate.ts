@@ -16,7 +16,7 @@ const MAX_OUTPUT_BYTES = 10 * 1024 * 1024; // maxBuffer 10 МБ (ТЗ 01 §7)
 export function runSolver(
   pythonBin: string,
   args: string[],
-  opts: { cwd: string; timeoutMs: number },
+  opts: { cwd: string; timeoutMs: number; /** Внешний стоп (LLM-сессии): SIGKILL child-процесса, тот же механизм, что таймаут. */ signal?: AbortSignal },
 ): Promise<SolverRunResult> {
   return new Promise<SolverRunResult>((resolvePromise) => {
     let settled = false;
@@ -56,6 +56,27 @@ export function runSolver(
       }
       finish({ exitCode: null, timedOut: true, spawnError: null, stdout, stderr });
     }, opts.timeoutMs);
+
+    if (opts.signal !== undefined) {
+      if (opts.signal.aborted) {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // процесс ещё не стартовал — kill не нужен
+        }
+        finish({ exitCode: null, timedOut: true, spawnError: null, stdout, stderr });
+      } else {
+        const onAbort = (): void => {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            // процесс мог завершиться в ту же миллисекунду
+          }
+          finish({ exitCode: null, timedOut: true, spawnError: null, stdout, stderr });
+        };
+        opts.signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
 
     child.on('error', (err: Error) => {
       finish({
