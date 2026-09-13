@@ -1,16 +1,16 @@
-// ТЗ 06 §3.5: валидация на лету (V-CLUST-SUM в баннере; V-MASK-PRESET — подсветка клеток
-// красным пунктиром + подтверждение при скачивании).
-// ТЗ 06 §3.6: viewport сетки 200×200 — fit, зум колесом, координаты курсора, панорамирование.
+// docs-unified/06 §3.5: валидация на лету (V-CLUST-SUM в баннере; V-MASK-PRESET —
+// подсветка клеток красным пунктиром) для проекта, загруженного с мок-API.
+// docs-unified/06 §3.6: viewport сетки 200×200 — fit, зум колесом, координаты, панорамирование.
 import { expect, test } from '@playwright/test';
-import { blockedFileInput, downloadButtons, manageDialogs, mainCanvas, presetFileInput, specFileInput, statusLine } from './helpers';
-import { EXAMPLES, makeFixturesDir } from './fixtures';
+import { readFileSync } from 'node:fs';
+import { mainCanvas, mockProject, selectProject, statusLine } from './helpers';
+import { EXAMPLES, SPEC_SUM_110, SPEC_TYPE_A_ONLY } from './fixtures';
 
-test.describe('Валидация на лету (ТЗ 06 §3.5)', () => {
+test.describe('Валидация на лету (docs-unified/06 §3.5)', () => {
   test('сумма долей > 100 → V-CLUST-SUM в баннере и подсказке панели кластеров', async ({ page }) => {
-    manageDialogs(page, { action: 'accept' });
-    const fix = makeFixturesDir();
+    await mockProject(page, 'demo', { 'spec.yaml': SPEC_SUM_110 });
     await page.goto('/');
-    await specFileInput(page).setInputFiles(fix.sum110);
+    await selectProject(page, 'demo');
 
     // Debounce валидации 300 мс — баннер обновится сам.
     const banner = page.getByRole('button', { name: /Ошибки валидации \(1\)/ });
@@ -23,13 +23,13 @@ test.describe('Валидация на лету (ТЗ 06 §3.5)', () => {
     await expect(clustersPanel.getByText(/Сумма долей: 110 % \(/)).toBeVisible();
   });
 
-  test('preset с чужим символом → V-MASK-PRESET, клетки подсвечены, скачивание — с подтверждением', async ({ page }) => {
-    const fix = makeFixturesDir();
-    // Ожидается ровно один диалог при скачивании маски: «У маски есть ошибки валидации…»
-    manageDialogs(page, { action: 'accept', textContains: 'ошибки валидации. Скачать как есть' });
+  test('preset с чужим символом → V-MASK-PRESET, клетки подсвечены красным пунктиром', async ({ page }) => {
+    await mockProject(page, 'demo', {
+      'spec.yaml': SPEC_TYPE_A_ONLY, // только тип A; в preset_example есть B
+      'preset.txt': readFileSync(EXAMPLES.presetExample, 'utf8'),
+    });
     await page.goto('/');
-    await specFileInput(page).setInputFiles(fix.typeAOnly); // только тип A; в preset_example есть B
-    await presetFileInput(page).setInputFiles(EXAMPLES.presetExample);
+    await selectProject(page, 'demo');
 
     const banner = page.getByRole('button', { name: /Ошибки валидации \(1\)/ });
     await expect(banner).toBeVisible({ timeout: 5000 });
@@ -67,16 +67,12 @@ test.describe('Валидация на лету (ТЗ 06 §3.5)', () => {
       },
     );
     expect(redPixels, 'красная пунктирная подсветка клетки (1,5) V-MASK-PRESET').toBeGreaterThan(5);
-
-    // Скачивание маски требует подтверждения (ошибки этой маски).
-    const [dl] = await Promise.all([page.waitForEvent('download'), downloadButtons(page).nth(2).click()]);
-    expect(dl.suggestedFilename()).toBe('preset_example.txt');
   });
 });
 
-test.describe('Viewport сетки 200×200 (ТЗ 06 §3.6)', () => {
+test.describe('Viewport сетки 200×200 (docs-unified/06 §3.6)', () => {
   test('создание спеки с нуля, fit, зум колесом, координаты курсора, панорамирование', async ({ page }) => {
-    manageDialogs(page, { action: 'accept' });
+    await mockProject(page, 'demo', { 'spec.yaml': SPEC_50X50_FOR_VIEWPORT });
     await page.goto('/');
 
     // «＋ Создать спеку…» → 200×200 (Решение Б: вместе со спекой — две пустые маски).
@@ -125,3 +121,25 @@ test.describe('Viewport сетки 200×200 (ТЗ 06 §3.6)', () => {
     await expect(statusLine(page)).toContainText('zoom 1.00×');
   });
 });
+
+// Минимальная спека для мока списка проектов (в сценарии viewport проект не выбирается).
+const SPEC_50X50_FOR_VIEWPORT = `grid:
+  width: 10
+  height: 10
+blockedFile: null
+presetFile: null
+types:
+  A: { symbol: "A", name: null }
+rules:
+  connectivity: 8
+  adjacency: { forbidden: [], allow: null }
+  size: { min: null, max: null }
+  convexity: { weight: soft }
+  fillAll: false
+  touchAll: false
+clusters:
+  - id: a1
+    type: A
+    areaPercent: 50
+    shape: free
+`;

@@ -26,6 +26,7 @@ rules:
   convexity:
     weight: soft
   fillAll: false
+  touchAll: true
 
 clusters:
   - id: room1

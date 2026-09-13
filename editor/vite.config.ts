@@ -1,13 +1,15 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// ТЗ 01 §2.6 / 03 §3: dev-сервер Vite на 5173, proxy /api → Express (localhost:3000).
+// Единый сервис (docs-unified/01 §5 / 04 §1.7): base '/editor/' — раздача с :4080
+// под /editor/*; dev-сервер Vite на 5173, proxy /api → единый сервис (localhost:4080).
 export default defineConfig({
+  base: '/editor/',
   plugins: [react()],
   server: {
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:3000',
+      '/api': 'http://localhost:4080',
     },
   },
 });

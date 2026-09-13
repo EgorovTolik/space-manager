@@ -1,56 +1,44 @@
-// ТЗ 06 §3.1–§3.2: round-trip без изменений (маска — побайтово, спека — эквивалентность
-// данных) + редактирование маски кликами по canvas (кисть toggle) и рисование preset'а
-// символом из палитры; скачанные файлы сверяются с ожидаемым текстом.
+// docs-unified/06 §3.1–§3.2 + 04-integrations.md §1.5: сохранение в проект — PUT полным
+// состоянием канонической тройки (маски побайтово, спека — эквивалентность данных);
+// редактирование маски кликами по canvas и рисование preset'а символом из палитры.
 import { expect, test } from '@playwright/test';
 import * as yaml from 'js-yaml';
 import { readFileSync } from 'node:fs';
-import { afterDraw, blockedFileInput, clickCell, downloadButtons, manageDialogs, presetFileInput, specFileInput } from './helpers';
-import { EXAMPLES, makeFixturesDir } from './fixtures';
+import { afterDraw, clickCell, mockProject, saveBtn, selectProject } from './helpers';
+import { EXAMPLES, SPEC_10X10_MASKED } from './fixtures';
 
 const originalBlocked = readFileSync(EXAMPLES.blockedBasic, 'utf8');
 const originalPreset = readFileSync(EXAMPLES.presetExample, 'utf8');
+const FILES = {
+  'spec.yaml': SPEC_10X10_MASKED,
+  'blocked.txt': originalBlocked,
+  'preset.txt': originalPreset,
+};
 
 function textAt(text: string, x: number, y: number): string {
   return (text.split('\n')[y] ?? '')[x];
 }
 
-test.describe('Round-trip и редактирование масок (10×10)', () => {
-  let fix: ReturnType<typeof makeFixturesDir>;
-
-  test.beforeAll(() => {
-    fix = makeFixturesDir();
-  });
-
-  test('§3.1 загрузка → скачивание без правок: маска побайтово, спека по данным', async ({ page }) => {
-    const dialogs = manageDialogs(page, { action: 'accept' });
+test.describe('Сохранение в проект и редактирование масок (10×10)', () => {
+  test('сохранение без правок: PUT = каноническая тройка, маски побайтово', async ({ page }) => {
+    const cap = await mockProject(page, 'demo', FILES);
     await page.goto('/');
-    await specFileInput(page).setInputFiles(fix.spec10);
-    await blockedFileInput(page).setInputFiles(EXAMPLES.blockedBasic);
-    await page.waitForTimeout(400); // debounce валидации
-    await expect(page.getByText('Ошибок валидации нет')).toBeVisible();
+    await selectProject(page, 'demo');
+    await expect(page.getByText('Ошибок валидации нет')).toBeVisible(); // debounce 300 мс
 
-    // Скачивание маски (без ошибок — без диалога): побайтовое совпадение.
-    const [d1] = await Promise.all([
-      page.waitForEvent('download'),
-      downloadButtons(page).nth(1).click(),
-    ]);
-    expect(d1.suggestedFilename()).toBe('blocked_basic.txt');
-    const maskOut = await d1.path();
-    expect(readFileSync(maskOut!, 'utf8')).toBe(originalBlocked);
+    await saveBtn(page).click();
+    await expect.poll(() => cap.puts.length).toBe(1);
+    const files = cap.puts[0];
+    expect(Object.keys(files).sort()).toEqual(['blocked.txt', 'preset.txt', 'spec.yaml']);
 
-    // Скачивание спеки (диалог о комментариях — accept): эквивалентность данных.
-    const [d2] = await Promise.all([
-      page.waitForEvent('download'),
-      downloadButtons(page).nth(0).click(),
-    ]);
-    expect(d2.suggestedFilename()).toBe('spec_10x10.yaml');
-    const specOut = readFileSync((await d2.path())!, 'utf8');
-    // Эквивалентность данных (ТЗ 06 §3.1) с учётом зафиксированного поведения:
-    //  - загрузка маски ставит её basename в blockedFile (ТЗ 02 §6);
-    //  - null-name у типов не сериализуется (канонический dump, ТЗ 02 §4).
-    const loaded = yaml.load(specOut) as Record<string, unknown>;
-    expect(loaded.blockedFile).toBe('blocked_basic.txt');
-    expect(loaded.presetFile ?? null).toBeNull();
+    // Маски — побайтовое совпадение с исходниками проекта.
+    expect(files['blocked.txt']).toBe(originalBlocked);
+    expect(files['preset.txt']).toBe(originalPreset);
+
+    // Спека — эквивалентность данных; имена масок канонические (docs-unified/04 §1.3).
+    const loaded = yaml.load(files['spec.yaml']) as Record<string, unknown>;
+    expect(loaded.blockedFile).toBe('blocked.txt');
+    expect(loaded.presetFile).toBe('preset.txt');
     expect(loaded.grid).toEqual({ width: 10, height: 10 });
     expect(loaded.clusters).toEqual([
       { id: 'a1', type: 'A', areaPercent: 40, shape: 'free' },
@@ -69,17 +57,15 @@ test.describe('Round-trip и редактирование масок (10×10)', 
     expect(types.A.symbol).toBe('A');
     expect(types.B.symbol).toBe('B');
 
-    // Диалог о потере комментариев действительно показывался (первое скачивание изменённой спеки).
-    expect(dialogs().some((m) => m.includes('комментарии'))).toBeTruthy();
+    // После сохранения: индикатор «Сохранено в …», точки ● нет.
+    await expect(saveBtn(page)).not.toHaveText('●');
+    await expect(page.getByText(/Сохранено в/)).toBeVisible();
   });
 
-  test('§3.2 кисть: заблокировать (5,5), снять (0,0); preset-кисть: поставить A в (5,7)', async ({ page }) => {
-    manageDialogs(page, { action: 'accept' });
+  test('кисть: заблокировать (5,5), снять (0,0); preset A в (5,7) — PUT с точечными изменениями', async ({ page }) => {
+    const cap = await mockProject(page, 'demo', FILES);
     await page.goto('/');
-    await specFileInput(page).setInputFiles(fix.spec10);
-    await blockedFileInput(page).setInputFiles(EXAMPLES.blockedBasic);
-    await presetFileInput(page).setInputFiles(EXAMPLES.presetExample);
-    await page.waitForTimeout(400);
+    await selectProject(page, 'demo');
     await expect(page.getByText('Ошибок валидации нет')).toBeVisible();
 
     // Режим «Маска блокировок» активен по умолчанию; кисть — toggle.
@@ -90,17 +76,19 @@ test.describe('Round-trip и редактирование масок (10×10)', 
     await clickCell(page, 0, 0, W, H); // была '*' → '.'
     await afterDraw(page);
 
-    const [d1] = await Promise.all([page.waitForEvent('download'), downloadButtons(page).nth(1).click()]);
-    const blockedOut = readFileSync((await d1.path())!, 'utf8');
+    // Есть несохранённые изменения — точка ● на кнопке (docs-unified/04 §1.5).
+    await expect(saveBtn(page)).toHaveText(/●/);
+
+    await saveBtn(page).click();
+    await expect.poll(() => cap.puts.length).toBe(1);
+    const blockedOut = cap.puts[0]['blocked.txt'];
     expect(textAt(blockedOut, 5, 5)).toBe('*');
     expect(textAt(blockedOut, 0, 0)).toBe('.');
     // Остальные клетки — без изменений.
-    const origLines = originalBlocked.split('\n');
-    const outLines = blockedOut.split('\n');
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         if ((x === 5 && y === 5) || (x === 0 && y === 0)) continue;
-        expect(textAt(blockedOut, x, y), `клетка (${x},${y})`).toBe(origLines[y][x]);
+        expect(textAt(blockedOut, x, y), `клетка (${x},${y})`).toBe(originalBlocked.split('\n')[y][x]);
       }
     }
 
@@ -110,10 +98,16 @@ test.describe('Round-trip и редактирование масок (10×10)', 
     await clickCell(page, 5, 7, W, H);
     await afterDraw(page);
 
-    const [d2] = await Promise.all([page.waitForEvent('download'), downloadButtons(page).nth(2).click()]);
-    const presetOut = readFileSync((await d2.path())!, 'utf8');
+    // Запрет рисования «поверх» (§3.6 ТЗ 04): blocked-кисть по клетке preset'а (1,5 → B) — noop.
+    await page.getByRole('button', { name: /^Маска блокировок/ }).click();
+    await clickCell(page, 1, 5, W, H); // занято B в preset — подсказка, клетка не меняется
+    await afterDraw(page);
+
+    await saveBtn(page).click();
+    await expect.poll(() => cap.puts.length).toBe(2);
+    const presetOut = cap.puts[1]['preset.txt'];
     expect(textAt(presetOut, 5, 7)).toBe('A');
-    // Остальные клетки — как в исходном эталоне.
+    expect(textAt(presetOut, 1, 5)).toBe('B'); // blocked-кисть не затёрла preset
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         if (x === 5 && y === 7) continue;
@@ -121,12 +115,7 @@ test.describe('Round-trip и редактирование масок (10×10)', 
       }
     }
 
-    // Запрет рисования «поверх» (§3.6 ТЗ 04): blocked-кисть по клетке preset'а (1,5 → B) — noop.
-    await page.getByRole('button', { name: /^Маска блокировок/ }).click();
-    await clickCell(page, 1, 5, W, H); // занято B в preset — подсказка, клетка не меняется
-    await afterDraw(page);
-    const [d3] = await Promise.all([page.waitForEvent('download'), downloadButtons(page).nth(2).click()]);
-    const presetOut2 = readFileSync((await d3.path())!, 'utf8');
-    expect(textAt(presetOut2, 1, 5)).toBe('B');
+    // После второго сохранения — снова чистое состояние.
+    await expect(saveBtn(page)).not.toHaveText('●');
   });
 });

@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ru } from './i18n/ru';
 import { EditorProvider, isDirty, useEditor } from './state/editorStore';
-import FilesPanel from './components/FilesPanel';
+import ProjectFilesPanel from './components/FilesPanel';
 import GridCanvas from './components/GridCanvas';
 import ClustersPanel from './components/ClustersPanel';
 import TypesPanel from './components/TypesPanel';
@@ -62,9 +62,9 @@ function Layout(): JSX.Element {
 
   return (
     <div style={styles.root}>
-      {/* Левая колонка: файлы + баннер ошибок (ТЗ 04 §1) */}
+      {/* Левая колонка: файлы проекта + баннер ошибок (docs-unified/04 §1) */}
       <aside style={styles.left}>
-        <FilesPanel />
+        <ProjectFilesPanel />
         <ValidationBanner />
       </aside>
 
@@ -101,7 +101,21 @@ function Layout(): JSX.Element {
 export default function App(): JSX.Element {
   return (
     <EditorProvider>
-      <h1 style={{ margin: '6px 8px', fontSize: '16px' }}>{ru.appTitle}</h1>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 12,
+          margin: '6px 8px',
+          fontSize: '16px',
+        }}
+      >
+        <h1 style={{ margin: 0 }}>{ru.appTitle}</h1>
+        {/* docs-unified/04 §1.2: заголовок — кнопка «← К проектам» (менеджер, /) */}
+        <a href="/" style={{ fontSize: '13px', color: '#1565c0' }}>
+          {ru.toProjects}
+        </a>
+      </div>
       <Layout />
     </EditorProvider>
   );

@@ -45,6 +45,8 @@ if (fs.existsSync(distDir)) {
       },
     }),
   );
+  // Двойной mount (docs-unified/01 §3.4): base '/editor/' — работает и '/', и '/editor/*'.
+  app.use('/editor', express.static(distDir));
 }
 
 // SPA-fallback (03 §2): GET-путь без расширения, не /api/* и не существующая

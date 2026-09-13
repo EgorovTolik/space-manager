@@ -42,7 +42,7 @@ describe('specYaml: round-trip эталонов examples', () => {
     const expected = [
       'grid:',
       '  width: 12',
-      '  height: 8',
+      '  height: 12',
       'blockedFile: blocked_touchall.txt',   // basename без './' (нюанс ТЗ 02 §4)
       'presetFile: null',
       'types:',

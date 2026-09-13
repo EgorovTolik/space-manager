@@ -1,26 +1,37 @@
-// ТЗ 06 §3: загрузка спеки → панели заполнились (типы/кластеры/правила), canvas отрисовал
-// сетку, ошибок валидации нет. Плюс базовые проверки «спека первой» (ТЗ 05 §1).
+// docs-unified/06 §3.1: выбор проекта → панели заполнились (типы/кластеры/правила),
+// canvas отрисовал сетку; V-MASK-DIM при размере маски ≠ сетке; URL ?project= (§1.8).
 import { expect, test } from '@playwright/test';
-import { APP_TITLE, blockedFileInput, mainCanvas, specFileInput, statusLine } from './helpers';
-import { EXAMPLES } from './fixtures';
+import { readFileSync } from 'node:fs';
+import { APP_TITLE, generateBtn, mainCanvas, mockProject, selectProject, statusLine } from './helpers';
+import { EXAMPLES, SPEC_50X50 } from './fixtures';
 
-test.describe('Загрузка спеки (examples/spec_basic.yaml)', () => {
-  test('панели заполнились, canvas отрисован, ошибок нет', async ({ page }) => {
+const FILES = {
+  'spec.yaml': SPEC_50X50,
+  // маска 10×10 к сетке 50×50 → V-MASK-DIM (docs-unified/04 §1.3)
+  'blocked.txt': readFileSync(EXAMPLES.blockedBasic, 'utf8'),
+};
+
+test.describe('Загрузка проекта (docs-unified/04 §1.3)', () => {
+  test('выбор проекта → панели заполнились, canvas отрисован, V-MASK-DIM в баннере', async ({ page }) => {
+    await mockProject(page, 'demo', FILES);
     await page.goto('/');
     await expect(page).toHaveTitle(/.+/);
     await expect(page.getByRole('heading', { name: APP_TITLE })).toBeVisible();
 
-    // До спеки: правые панели заблокированы, подпись «Сначала загрузите спекацию».
+    // Заголовок: кнопка «← К проектам» (docs-unified/04 §1.2) ведёт в менеджер.
+    await expect(page.getByRole('link', { name: '← К проектам' })).toHaveAttribute('href', '/');
+
+    // До проекта: правые панели заблокированы, подпись «Сначала загрузите спекацию».
     await expect(page.getByText('Сначала загрузите спекацию').first()).toBeVisible();
 
-    await specFileInput(page).setInputFiles(EXAMPLES.specBasic);
+    await selectProject(page, 'demo');
 
     // Табы появились.
     for (const tab of ['Кластеры', 'Типы', 'Правила']) {
       await expect(page.getByRole('button', { name: tab, exact: true }).first()).toBeVisible();
     }
 
-    // Кластеры: 3 строки из spec_basic.yaml (room1/room2/corridor1), сумма долей 51%.
+    // Кластеры: 3 строки спеки (room1/room2/corridor1), сумма долей 51 %.
     const clustersPanel = page.locator('section.panel', { has: page.getByRole('heading', { name: 'Кластеры' }) });
     for (const id of ['room1', 'room2', 'corridor1']) {
       await expect(clustersPanel.getByText(id, { exact: true })).toBeVisible();
@@ -41,6 +52,9 @@ test.describe('Загрузка спеки (examples/spec_basic.yaml)', () => {
     await expect(rulesPanel.locator('input[type=checkbox]').nth(1)).not.toBeChecked();
     await expect(rulesPanel.locator('input[type=checkbox]').nth(2)).not.toBeChecked();
 
+    // Маска загружена с сервера: имя каноническое, размер ≠ сетка → пометка в панели.
+    await expect(page.getByText(/имя: blocked\.txt/)).toContainText('размер ≠ сетка ⚠');
+
     // Canvas: сетка отрисована, строка статуса — «клеток всего 50×50».
     const canvas = mainCanvas(page);
     await expect(canvas).toBeVisible();
@@ -48,16 +62,34 @@ test.describe('Загрузка спеки (examples/spec_basic.yaml)', () => {
     expect(box && box.width > 100 && box.height > 100).toBeTruthy();
     await expect(statusLine(page)).toContainText('клеток всего 50×50');
 
-    // Ошибок валидации нет (баннер зелёный).
-    await page.waitForTimeout(400); // debounce валидации 300 мс
-    await expect(page.getByText('Ошибок валидации нет')).toBeVisible();
-
     // Маска 10×10 к сетке 50×50 → V-MASK-DIM: файл загружается, ошибка — в баннере (ТЗ 05 §2.2).
-    await blockedFileInput(page).setInputFiles(EXAMPLES.blockedBasic);
-    await expect(page.getByText('размер ≠ сетка ⚠')).toBeVisible();
     const banner = page.getByRole('button', { name: /Ошибки валидации \(1\)/ });
-    await expect(banner).toBeVisible();
+    await expect(banner).toBeVisible({ timeout: 5000 }); // debounce валидации 300 мс
     await banner.click();
     await expect(page.locator('code').getByText('V-MASK-DIM')).toBeVisible();
+
+    // URL обогатился ?project=demo (replaceState, docs-unified/04 §1.8).
+    await expect.poll(() => page.evaluate(() => window.location.search)).toBe('?project=demo');
+
+    // Кнопки сохранения/генерации активны (проект выбран, спека загружена).
+    await expect(generateBtn(page)).toBeEnabled();
+  });
+
+  test('URL ?project=<name> — проект подгружается автоматически', async ({ page }) => {
+    await mockProject(page, 'demo', FILES);
+    await page.goto('/?project=demo');
+    await expect(page.getByRole('combobox', { name: 'Проект' })).toHaveValue('demo', { timeout: 10_000 });
+    const clustersPanel = page.locator('section.panel', { has: page.getByRole('heading', { name: 'Кластеры' }) });
+    await expect(clustersPanel.getByText('room1', { exact: true })).toBeVisible({ timeout: 10_000 });
+  });
+
+  test('URL ?project=<нет в списке> — баннер «не найден», список подгружен', async ({ page }) => {
+    await mockProject(page, 'demo', FILES);
+    await page.goto('/?project=missing');
+    await expect(page.getByText(/Проект «missing» не найден/)).toBeVisible({ timeout: 10_000 });
+    // Селектор заполнился списком (просто проект с таким именем отсутствует).
+    const select = page.getByRole('combobox', { name: 'Проект' });
+    await expect(select).toBeEnabled();
+    await expect(select.locator('option')).toHaveCount(2); // «— выберите —» + demo
   });
 });

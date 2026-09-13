@@ -6,7 +6,7 @@
 
 grid:
   width: 12
-  height: 8
+  height: 12
 
 blockedFile: ./blocked_touchall.txt   # одна заблокированная клетка в углу → F = 95
 presetFile: null

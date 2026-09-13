@@ -1,26 +1,35 @@
-// Панель файлов (ТЗ 04 §1, имена скачиваемых файлов — ТЗ 02 §6, создание «с нуля» — 02 §7).
+// ProjectFilesPanel (docs-unified/04-integrations.md §1.3–§1.8).
 //
-// Механики:
-// - Спекация загружается ПЕРВОЙ (drag&drop или выбор файла); повторная загрузка при
-//   несохранённых изменениях — с подтверждением «Текущие изменения будут потеряны».
-// - «＋ Создать спеку…» — диалог W×H → SpecDoc с дефолтами ТЗ 02 §4 + две пустые маски.
-// - Поля W×H редактируемы в любой момент (целые > 0); GRID_RESIZE применяется только
-//   после подтверждения, если реально отбрасываются занятые клетки масок.
-// - Маски: Загрузить (файл с несовпадающим размером загружается тоже — V-MASK-DIM в
-//   баннере, редактирование canvas блокируется) / Добавить (пустая) / Удалить / Скачать.
-// - Скачивание — Blob + <a download>; предупреждение о потере комментариев — при ПЕРВОМ
-//   скачивании изменённой спеки (ТЗ 02 §4 п.1); подтверждение «Скачать как есть?» при
-//   ошибках: спека — любые, маска — только этой маски (ТЗ 05 §3 п.3).
-// - Маркер «изменено» у кнопок скачивания сбрасывается после скачивания файла (ТЗ 04 §8);
-//   когда все файлы чистые — markClean() (глобальный dirty для beforeunload/подтверждений).
+// Проектный режим ПОЛНОСТЬЮ заменяет standalone «загрузил файл → скачал»:
+// - выбор проекта из списка (`GET /api/projects`) → файлы читаются с сервера;
+//   имена масок нормализуются: спека, ссылающаяся на нестандартное имя маски
+//   (после импорта архива), читается по исходному имени, а в модели получает
+//   каноническое blocked.txt / preset.txt (§1.3 п.2);
+// - «💾 Сохранить в проект» → `PUT …/files` полным состоянием канонической тройки
+//   (отсутствующая маска = удаление файла, 02 §6.9);
+// - «⚡ Генерировать размещение» → автосохранение (если dirty) + `POST …/generate`;
+//   блок результата: exit 0 (зелёная строка + ссылка Viewer3D), exit 1 (infeasible —
+//   причина из блока до «== КАРТА ==»), HTTP-ошибка (422 — подсказка про валидацию).
+//
+// Сохраняются секции, оперирующие МОДЕЛЬЮ, а не файлами (docs-unified/04 §1.2):
+// W×H, «＋ Создать спеку…», управление масками (Добавить/Удалить), заметка о
+// неизвестных полях. Dirty-отслеживание — по базлайну сериализации модели
+// (загрузка/сохранение сбрасывают dirty; любое изменение модели после — ●).
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, DragEvent, ChangeEvent, KeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import { ru } from '../i18n/ru';
 import { isDirty, markClean, useEditor } from '../state/editorStore';
 import type { MaskKind, Rules, SpecDoc } from '../lib/types';
 import { dumpSpec, parseSpecWithWarnings } from '../lib/specYaml';
 import { dumpMask, MaskParseError, parseBlockedMaskAny, parsePresetMaskAny } from '../lib/maskText';
-import { downloadTextFile, maskDownloadName, maskErrorsFor, specDownloadName } from '../lib/fileUtils';
+import {
+  ApiError,
+  generatePlacement,
+  listProjects,
+  loadProjectFile,
+  saveProjectFiles,
+} from '../lib/api';
+import type { GenerateResult, ProjectInfo } from '../lib/api';
 
 // Дефолты новой спеки (ТЗ 02 §4 п.4 — те же, что в парсинге docs/03).
 const DEFAULT_RULES: Rules = {
@@ -38,6 +47,7 @@ const btnStyle: CSSProperties = { padding: '3px 8px', cursor: 'pointer' };
 const disabledBtnStyle: CSSProperties = { ...btnStyle, cursor: 'not-allowed', opacity: 0.5 };
 const statusStyle: CSSProperties = { color: '#555', fontSize: 12, marginTop: 2 };
 const errorStyle: CSSProperties = { color: '#c62828', fontSize: 12, marginTop: 4 };
+const okStyle: CSSProperties = { color: '#2e7d32', fontSize: 12, marginTop: 4 };
 const noteStyle: CSSProperties = {
   background: '#fff3cd',
   border: '1px solid #f0ad4e',
@@ -46,29 +56,65 @@ const noteStyle: CSSProperties = {
   fontSize: 12,
   marginTop: 6,
 };
-const dropStyle: CSSProperties = {
-  border: '1px dashed #999',
-  borderRadius: 4,
-  padding: '6px 8px',
-  minHeight: 34,
-  display: 'flex',
-  alignItems: 'center',
-};
 
-export default function FilesPanel(): JSX.Element {
+interface Baseline {
+  spec: string | null;
+  blocked: string | null;
+  preset: string | null;
+}
+
+export default function ProjectFilesPanel(): JSX.Element {
   const { state, dispatch } = useEditor();
   const spec = state.spec;
 
-  // Имена исходно загруженных файлов (ТЗ 02 §6/§8: редактор не знает путей, только basename).
-  const [specOriginalName, setSpecOriginalName] = useState<string | null>(null);
-  const [blockedOrigName, setBlockedOrigName] = useState<string | null>(null);
-  const [presetOrigName, setPresetOrigName] = useState<string | null>(null);
+  // ── Состояние панели (локальное React-состояние, store не меняется — §1.3) ───
+  const [projects, setProjects] = useState<ProjectInfo[] | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [loadingProject, setLoadingProject] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [projectNotFound, setProjectNotFound] = useState<string | null>(null);
+  const [fileMissing, setFileMissing] = useState<{ blocked: boolean; preset: boolean }>({
+    blocked: false,
+    preset: false,
+  });
 
-  // Маркер «изменено» на файл (ТЗ 04 §8) — сбрасывается скачиванием соответствующего файла.
-  const [dirtyFiles, setDirtyFiles] = useState({ spec: false, blocked: false, preset: false });
-  const commentWarnedRef = useRef(false); // предупреждение о комментариях — один раз на спеку
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
 
-  // Поля W×H (ТЗ 04 §1): локальный текст + inline-ошибка; применение — Enter/«Применить».
+  const [generating, setGenerating] = useState(false);
+  const [genResult, setGenResult] = useState<GenerateResult | null>(null);
+  const [genError, setGenError] = useState<{ message: string; input: boolean } | null>(null);
+
+  // ── Dirty-отслеживание (базлайн сериализации) ────────────────────────────────
+  // Базлайн — сериализация модели в момент загрузки/сохранения. «Изменено» =
+  // текущая сериализация отличается. Вычисляется на рендере (дёшево: сотня
+  // клеток), чтобы сразу отражать и смену базлайна после сохранения.
+  const baselineRef = useRef<Baseline>({ spec: null, blocked: null, preset: null });
+  const b = baselineRef.current;
+  const curSer: Baseline = {
+    spec: state.spec ? dumpSpec(state.spec) : null,
+    blocked: state.blockedMask ? dumpMask(state.blockedMask) : null,
+    preset: state.presetMask ? dumpMask(state.presetMask) : null,
+  };
+  const dirtyFiles = {
+    spec: curSer.spec !== b.spec,
+    blocked: curSer.blocked !== b.blocked,
+    preset: curSer.preset !== b.preset,
+  };
+
+  // Любое изменение модели после базлайна → «изменено» на соответствующий файл.
+  // Эффект работает ПОСЛЕ рендера (редьюсер store уже пометил dirty=true от
+  // закешированных dispatch-ей загрузки) — поэтому сброс глобального dirty здесь:
+  // если состояние побайтово совпало с базлайном, изменений для сохранения нет.
+  useEffect(() => {
+    if (!dirtyFiles.spec && !dirtyFiles.blocked && !dirtyFiles.preset) {
+      markClean(); // идемпотентно; побеждает над dirty=true из редьюсера загрузки
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.spec, state.blockedMask, state.presetMask]);
+
+  // ── Поля W×H (ТЗ 04 §1 — сохраняется из standalone) ──────────────────────────
   const [wText, setWText] = useState('');
   const [hText, setHText] = useState('');
   const [sizeError, setSizeError] = useState<string | null>(null);
@@ -80,62 +126,124 @@ export default function FilesPanel(): JSX.Element {
   const [createError, setCreateError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const specInputRef = useRef<HTMLInputElement | null>(null);
-  const blockedInputRef = useRef<HTMLInputElement | null>(null);
-  const presetInputRef = useRef<HTMLInputElement | null>(null);
+  // ── Список проектов + URL-параметр ?project= (docs-unified/04 §1.8) ───────────
 
-  // Любое изменение модели помечает соответствующий файл «изменённым» (ТЗ 04 §8).
   useEffect(() => {
-    if (state.spec) setDirtyFiles((d) => (d.spec ? d : { ...d, spec: true }));
-  }, [state.spec]);
-  useEffect(() => {
-    if (state.blockedMask) setDirtyFiles((d) => (d.blocked ? d : { ...d, blocked: true }));
-  }, [state.blockedMask]);
-  useEffect(() => {
-    if (state.presetMask) setDirtyFiles((d) => (d.preset ? d : { ...d, preset: true }));
-  }, [state.presetMask]);
+    let cancelled = false;
+    listProjects()
+      .then((list) => {
+        if (cancelled) return;
+        setProjects(list);
+        const urlProject = new URLSearchParams(window.location.search).get('project');
+        if (urlProject && urlProject.length > 0) {
+          if (list.some((p) => p.name === urlProject)) {
+            setSelected(urlProject); // селектор показывает автозагруженный проект
+            void loadProject(urlProject);
+          } else {
+            setProjectNotFound(urlProject);
+          }
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setLoadError(errText(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Все файлы скачаны/чисты — глобальный dirty сбрасывается (beforeunload, подтверждения).
-  useEffect(() => {
-    if (!dirtyFiles.spec && !dirtyFiles.blocked && !dirtyFiles.preset) markClean();
-  }, [dirtyFiles]);
+  function onProjectChosen(name: string): void {
+    if (name.length === 0) return;
+    setSelected(name);
+    setProjectNotFound(null);
+    const url = new URL(window.location.href);
+    url.searchParams.set('project', name);
+    window.history.replaceState(null, '', url.toString());
+    void loadProject(name);
+  }
 
-  // Синхронизация полей W×H при смене/загрузке спеки.
-  useEffect(() => {
-    if (state.spec) {
-      setWText(String(state.spec.grid.width));
-      setHText(String(state.spec.grid.height));
-      setSizeError(null);
-    }
-  }, [state.spec]);
+  // ── Загрузка проекта (docs-unified/04 §1.3) ───────────────────────────────────
 
-  // ── Загрузка спеки ────────────────────────────────────────────────────────────
-
-  async function handleSpecFile(file: File): Promise<void> {
+  async function loadProject(name: string): Promise<void> {
     if (isDirty() && !window.confirm(ru.files.overwriteConfirm)) return;
+    setLoadingProject(true);
+    setLoadError(null);
+    setSaveError(null);
+    setSavedAt(null);
+    setGenResult(null);
+    setGenError(null);
+    setFileMissing({ blocked: false, preset: false });
     try {
-      const text = await file.text();
-      const { doc, unknownFields } = parseSpecWithWarnings(text);
+      const specText = await loadProjectFile(name, 'spec.yaml');
+      const { doc, unknownFields } = parseSpecWithWarnings(specText);
+      // Нормализация имён масок (§1.3 п.2): содержимое читаем по ИСХОДНОМУ имени,
+      // в модели — каноническое blocked.txt / preset.txt.
+      const origBlocked = doc.blockedFile;
+      const origPreset = doc.presetFile;
+      if (doc.blockedFile !== null) doc.blockedFile = 'blocked.txt';
+      if (doc.presetFile !== null) doc.presetFile = 'preset.txt';
+
+      // Маски предыдущего проекта не должны оставаться после переключения.
+      if (state.blockedMask) dispatch({ type: 'MASK_CLEARED', kind: 'blocked' });
+      if (state.presetMask) dispatch({ type: 'MASK_CLEARED', kind: 'preset' });
       dispatch({ type: 'SPEC_LOADED', doc });
-      setSpecOriginalName(file.name);
-      commentWarnedRef.current = false; // новая спека — предупреждение о комментариях снова «первое»
+
       setNotice(
         unknownFields.length > 0
           ? ru.files.unknownFieldsNote.replace('{fields}', unknownFields.join(', '))
           : null,
       );
+
+      const missing = { blocked: false, preset: false };
+      let loadedBlocked: ReturnType<typeof parseBlockedMaskAny> | null = null;
+      let loadedPreset: string | null = null; // сериализация для базлайна
+      if (origBlocked) {
+        try {
+          const text = await loadProjectFile(name, origBlocked);
+          const mask = parseBlockedMaskAny(text);
+          dispatch({ type: 'MASK_LOADED', kind: 'blocked', mask, fileName: 'blocked.txt' });
+          loadedBlocked = mask;
+        } catch (e) {
+          if (!isFileNotFound(e)) throw e;
+          missing.blocked = true; // «файл не найден на сервере» — статус секции, не ошибка валидации
+        }
+      }
+      if (origPreset) {
+        try {
+          const text = await loadProjectFile(name, origPreset);
+          const symbols = Object.values(doc.types).map((t) => t.symbol);
+          const res = parsePresetMaskAny(text, symbols);
+          dispatch({
+            type: 'MASK_LOADED',
+            kind: 'preset',
+            mask: res.mask,
+            fileName: 'preset.txt',
+            presetErrors: res.errors,
+          });
+          loadedPreset = dumpMask(res.mask);
+        } catch (e) {
+          if (!isFileNotFound(e)) throw e;
+          missing.preset = true;
+        }
+      }
+
+      setFileMissing(missing);
+      baselineRef.current = {
+        spec: dumpSpec(doc),
+        blocked: loadedBlocked ? dumpMask(loadedBlocked) : null,
+        preset: loadedPreset,
+      };
+      markClean(); // загрузка — не «изменение» (beforeunload/подтверждения)
     } catch (e) {
-      window.alert(`${ru.files.parseErrorTitle} ${e instanceof Error ? e.message : String(e)}`);
+      setLoadError(`${ru.project.loadError} ${errText(e)}`);
+      // Состояние до этой загрузки НЕ сбрасывается (§1.3 п.4).
+    } finally {
+      setLoadingProject(false);
     }
   }
 
-  function onSpecDrop(e: DragEvent): void {
-    e.preventDefault();
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) void handleSpecFile(f);
-  }
-
-  // ── Создание спеки «с нуля» (ТЗ 02 §7, Решение Б) ────────────────────────────
+  // ── «＋ Создать спеку…» (ТЗ 02 §7 — сохраняется из standalone) ────────────────
 
   function createSpec(): void {
     const w = parsePositiveInt(createW);
@@ -157,8 +265,6 @@ export default function FilesPanel(): JSX.Element {
     // Решение Б: вместе со спекой создаются ДВЕ пустые маски (размер = grid).
     dispatch({ type: 'MASK_ADDED', kind: 'blocked' });
     dispatch({ type: 'MASK_ADDED', kind: 'preset' });
-    setSpecOriginalName(null); // создана с нуля → скачивается как spec.yaml (ТЗ 02 §6)
-    commentWarnedRef.current = false;
     setNotice(null);
     setShowCreate(false);
   }
@@ -177,7 +283,6 @@ export default function FilesPanel(): JSX.Element {
       setSizeError(null);
       return;
     }
-    // Подтверждение — только если что-то реально отбрасывается (ТЗ 04 §1).
     const dropped = countDroppedCells(w, h);
     if (dropped > 0 && !window.confirm(ru.files.resizeConfirm)) return;
     dispatch({ type: 'GRID_RESIZE', w, h });
@@ -210,131 +315,145 @@ export default function FilesPanel(): JSX.Element {
     return n;
   }
 
-  // ── Маски ─────────────────────────────────────────────────────────────────────
-
-  async function handleMaskFile(kind: MaskKind, file: File): Promise<void> {
-    if (!spec) return;
-    try {
-      const text = await file.text();
-      if (kind === 'blocked') {
-        // Несовпадение размера НЕ отклоняет файл: маска загружается в своём размере,
-        // V-MASK-DIM появится в баннере (store MASK_LOADED), canvas покажет заглушку.
-        const mask = parseBlockedMaskAny(text);
-        dispatch({ type: 'MASK_LOADED', kind, mask, fileName: file.name });
-        setBlockedOrigName(file.name);
-      } else {
-        const symbols = Object.values(spec.types).map((t) => t.symbol);
-        const res = parsePresetMaskAny(text, symbols);
-        dispatch({ type: 'MASK_LOADED', kind, mask: res.mask, fileName: file.name, presetErrors: res.errors });
-        setPresetOrigName(file.name);
-      }
-    } catch (e) {
-      window.alert(`${ru.files.parseErrorTitle} ${e instanceof MaskParseError ? e.message : e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+  // ── Маски: Добавить / Удалить (управление моделью — сохраняется) ──────────────
 
   function addMask(kind: MaskKind): void {
     if (!spec) return;
     dispatch({ type: 'MASK_ADDED', kind });
-    if (kind === 'blocked') setBlockedOrigName(null);
-    else setPresetOrigName(null);
+    setFileMissing((m) => ({ ...m, [kind]: false }));
   }
 
   function removeMask(kind: MaskKind): void {
     const label = kind === 'blocked' ? ru.files.maskBlockedSection : ru.files.maskPresetSection;
     if (!window.confirm(ru.files.removeMaskConfirm.replace('{kind}', label))) return;
     dispatch({ type: 'MASK_CLEARED', kind });
-    if (kind === 'blocked') setBlockedOrigName(null);
-    else setPresetOrigName(null);
   }
 
-  // ── Скачивание (ТЗ 02 §6, предупреждения — ТЗ 02 §4 п.1 / 05 §3 п.3) ───────────
+  // ── «💾 Сохранить в проект» (docs-unified/04 §1.5) ────────────────────────────
 
-  function downloadSpecFile(): void {
-    if (!spec) return;
-    const n = state.ui.errors.length;
-    if (n > 0 && !window.confirm(ru.files.downloadAsIsErrors.replace('{n}', String(n)))) return;
-    if (isDirty() && !commentWarnedRef.current) {
-      commentWarnedRef.current = true; // предупреждение — только при ПЕРВОМ скачивании изменённой спеки
-      if (!window.confirm(ru.files.commentLossConfirm)) return;
+  async function saveToProject(): Promise<boolean> {
+    if (!spec || !selected) return false;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const files: Record<string, string> = { 'spec.yaml': dumpSpec(spec) };
+      if (state.blockedMask !== null) files['blocked.txt'] = dumpMask(state.blockedMask);
+      if (state.presetMask !== null) files['preset.txt'] = dumpMask(state.presetMask);
+      await saveProjectFiles(selected, files);
+      baselineRef.current = {
+        spec: files['spec.yaml'],
+        blocked: files['blocked.txt'] ?? null,
+        preset: files['preset.txt'] ?? null,
+      };
+      markClean();
+      setSavedAt(new Date());
+      return true;
+    } catch (e) {
+      setSaveError(`${ru.project.saveErrorTitle} ${errText(e)}`);
+      return false;
+    } finally {
+      setSaving(false);
     }
-    downloadTextFile(specDownloadName(specOriginalName), dumpSpec(spec));
-    setDirtyFiles((d) => ({ ...d, spec: false }));
   }
 
-  function downloadMaskFile(kind: MaskKind): void {
-    if (!spec) return;
-    const mask = kind === 'blocked' ? state.blockedMask : state.presetMask;
-    if (!mask) return;
-    // Подтверждение — только при ошибках ЭТОЙ маски (ТЗ 05 §3 п.3).
-    if (maskErrorsFor(state.ui.errors, kind).length > 0 && !window.confirm(ru.files.maskDownloadAsIs)) return;
-    const name = maskDownloadName(
-      kind === 'blocked' ? spec.blockedFile : spec.presetFile,
-      kind === 'blocked' ? blockedOrigName : presetOrigName,
-      kind === 'blocked' ? 'blocked.txt' : 'preset.txt',
-    );
-    downloadTextFile(name, dumpMask(mask));
-    setDirtyFiles((d) => ({ ...d, [kind]: false }));
+  // ── «⚡ Генерировать размещение» (docs-unified/04 §1.6) ───────────────────────
+
+  async function onGenerate(): Promise<void> {
+    if (!spec || !selected || generating) return;
+    setGenerating(true);
+    setGenResult(null);
+    setGenError(null);
+    try {
+      // 1. Автосохранение: генерация работает с тем, что на диске.
+      if (isDirty()) {
+        const ok = await saveToProject();
+        if (!ok) return; // ошибка сохранения прерывает генерацию
+      }
+      // 2. POST generate (серверный таймаут 60 с вернёт 504 — клиентский не нужен).
+      const res = await generatePlacement(selected);
+      setGenResult(res);
+    } catch (e) {
+      const input = e instanceof ApiError && e.status === 422; // SOLVER_INPUT
+      setGenError({ message: errText(e), input });
+    } finally {
+      setGenerating(false);
+    }
   }
 
-  // ── Статусы файлов (загружена / нет / размер ≠ сетка ⚠ — ТЗ 04 §1) ────────────
+  /** Текст причины невозможности — строки отчёта ДО маркера «== КАРТА ==» (04 §1.6). */
+  function infeasibleReason(report: string): string {
+    const head = report.split('== КАРТА ==')[0].trim();
+    const lines = head.split('\n').filter((l) => l.trim().length > 0);
+    return lines.slice(1).join('\n'); // первая строка «НЕ УДАЛОСЬ…» показана отдельным заголовком
+  }
+
+  // ── Статусы секций ────────────────────────────────────────────────────────────
 
   function maskStatus(kind: MaskKind): string {
     const mask = kind === 'blocked' ? state.blockedMask : state.presetMask;
     if (!spec || !mask) return ru.files.notLoaded;
-    const name =
-      (kind === 'blocked' ? blockedOrigName : presetOrigName) ??
-      (kind === 'blocked' ? spec.blockedFile : spec.presetFile) ??
-      (kind === 'blocked' ? 'blocked.txt' : 'preset.txt');
+    const name = kind === 'blocked' ? 'blocked.txt' : 'preset.txt';
+    if (fileMissing[kind]) return ru.project.fileMissing;
     if (mask.width !== spec.grid.width || mask.height !== spec.grid.height) {
       return `имя: ${name} · ${ru.files.dimMismatchMark}`;
     }
     return `имя: ${name}`;
   }
 
-  function onFileChosen(handler: (f: File) => void): (e: ChangeEvent<HTMLInputElement>) => void {
-    return (e: ChangeEvent<HTMLInputElement>) => {
-      const f = e.target.files && e.target.files[0];
-      if (f) handler(f);
-      e.target.value = ''; // повторный выбор одного и того же файла срабатывает снова
-    };
-  }
-
+  const busy = saving || generating;
+  const canSave = Boolean(spec && selected) && !busy;
   const dirtyDot = (b: boolean): string => (b ? ' ●' : '');
+  const anyDirty = dirtyFiles.spec || dirtyFiles.blocked || dirtyFiles.preset;
 
   return (
     <section className="panel" style={{ padding: 8 }}>
       <h2 style={{ marginTop: 0 }}>{ru.panels.files}</h2>
 
+      {/* ── Проект (docs-unified/04 §1.3) ── */}
+      <div style={sectionStyle}>
+        <strong>{ru.project.section}</strong>
+        <div style={rowStyle}>
+          <select
+            aria-label={ru.project.selectAria}
+            value={selected ?? ''}
+            disabled={loadingProject || projects === null}
+            onChange={(e) => onProjectChosen(e.target.value)}
+            style={{ flex: 1, minWidth: 0 }}
+          >
+            <option value="">{ru.project.placeholder}</option>
+            {(projects ?? []).map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {loadingProject && (
+          <div style={statusStyle}>{ru.project.loading}</div>
+        )}
+        {!loadingProject && projects !== null && selected && !loadError && (
+          <div style={statusStyle}>{ru.project.loaded.replace('{name}', selected)}</div>
+        )}
+        {!loadingProject && projects !== null && projects.length === 0 && (
+          <div style={errorStyle}>{ru.project.noProjects}</div>
+        )}
+        {projectNotFound && (
+          <div style={errorStyle}>
+            {ru.project.notFoundBanner.replace('{name}', projectNotFound)}
+          </div>
+        )}
+        {loadError && <div style={errorStyle}>{loadError}</div>}
+      </div>
+
       {/* ── Спекация ── */}
       <div style={sectionStyle}>
         <strong>{ru.files.specSection}</strong>
         {spec ? (
-          <div style={statusStyle}>
-            имя: {specOriginalName ?? 'spec.yaml'}
-          </div>
+          <div style={statusStyle}>имя: spec.yaml</div>
         ) : (
-          <div
-            style={{ ...dropStyle, marginTop: 4 }}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={onSpecDrop}
-          >
-            <span style={{ color: '#888' }}>drag&drop spec.yaml или:</span>
-            <button type="button" style={{ ...btnStyle, marginLeft: 6 }} onClick={() => specInputRef.current?.click()}>
-              📂 {ru.buttons.load}
-            </button>
-          </div>
+          <div style={statusStyle}>{ru.project.notSelected}</div>
         )}
         <div style={rowStyle}>
-          <button
-            type="button"
-            style={btnStyle}
-            disabled={!spec}
-            title={spec ? undefined : ru.grid.noSpec}
-            onClick={() => specInputRef.current?.click()}
-          >
-            📂 {ru.buttons.load}
-          </button>
           <button
             type="button"
             style={btnStyle}
@@ -344,15 +463,6 @@ export default function FilesPanel(): JSX.Element {
             }}
           >
             {ru.files.createSpec}
-          </button>
-          <button
-            type="button"
-            style={spec ? btnStyle : disabledBtnStyle}
-            disabled={!spec}
-            title={dirtyFiles.spec ? ru.files.commentLossConfirm : undefined}
-            onClick={downloadSpecFile}
-          >
-            ⬇ {ru.buttons.download}{dirtyDot(dirtyFiles.spec)}
           </button>
         </div>
 
@@ -412,11 +522,8 @@ export default function FilesPanel(): JSX.Element {
         title={ru.files.maskBlockedSection}
         status={maskStatus('blocked')}
         disabled={!spec}
-        dirty={dirtyFiles.blocked}
-        onUpload={() => blockedInputRef.current?.click()}
         onAdd={() => addMask('blocked')}
         onRemove={() => removeMask('blocked')}
-        onDownload={() => downloadMaskFile('blocked')}
       />
 
       {/* ── Preset-карта ── */}
@@ -424,49 +531,93 @@ export default function FilesPanel(): JSX.Element {
         title={ru.files.maskPresetSection}
         status={maskStatus('preset')}
         disabled={!spec}
-        dirty={dirtyFiles.preset}
-        onUpload={() => presetInputRef.current?.click()}
         onAdd={() => addMask('preset')}
         onRemove={() => removeMask('preset')}
-        onDownload={() => downloadMaskFile('preset')}
       />
 
-      {/* Скрытые file-inputs */}
-      <input
-        ref={specInputRef}
-        type="file"
-        accept=".yaml,.yml,text/yaml"
-        style={{ display: 'none' }}
-        onChange={onFileChosen((f) => void handleSpecFile(f))}
-      />
-      <input
-        ref={blockedInputRef}
-        type="file"
-        accept=".txt,text/plain"
-        style={{ display: 'none' }}
-        onChange={onFileChosen((f) => void handleMaskFile('blocked', f))}
-      />
-      <input
-        ref={presetInputRef}
-        type="file"
-        accept=".txt,text/plain"
-        style={{ display: 'none' }}
-        onChange={onFileChosen((f) => void handleMaskFile('preset', f))}
-      />
+      {/* ── Сохранение и генерация (docs-unified/04 §1.5–§1.6) ── */}
+      <div style={{ ...sectionStyle, borderTop: '1px solid #ddd', paddingTop: 8 }}>
+        <div style={rowStyle}>
+          <button
+            type="button"
+            style={canSave ? btnStyle : disabledBtnStyle}
+            disabled={!canSave}
+            title={!spec ? ru.grid.noSpec : !selected ? ru.project.notSelected : undefined}
+            onClick={() => void saveToProject()}
+          >
+            {saving ? ru.project.saving : ru.project.saveBtn}
+            {dirtyDot(anyDirty)}
+          </button>
+        </div>
+        <div style={rowStyle}>
+          <button
+            type="button"
+            style={canSave ? btnStyle : disabledBtnStyle}
+            disabled={!canSave}
+            aria-busy={generating || undefined}
+            title={!spec ? ru.grid.noSpec : !selected ? ru.project.notSelected : undefined}
+            onClick={() => void onGenerate()}
+          >
+            {generating ? ru.project.generating : ru.project.generateBtn}
+          </button>
+        </div>
+
+        {savedAt && !anyDirty && (
+          <div style={statusStyle}>
+            {ru.project.savedAt.replace('{time}', savedAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }))}
+          </div>
+        )}
+        {saveError && <div style={errorStyle}>{saveError}</div>}
+
+        {/* Блок результата генерации (04 §1.6) */}
+        {genResult && genResult.feasible && (
+          <div style={{ ...okStyle, marginTop: 8 }}>
+            <div>{ru.project.genSuccess.replace('{file}', genResult.resultFile)}</div>
+            <div>
+              <a
+                href={`/viewer3d?project=${encodeURIComponent(selected ?? '')}&result=${encodeURIComponent(genResult.resultFile)}`}
+              >
+                {ru.project.openViewer3d}
+              </a>{' '}
+              · <code>{genResult.resultFile}</code>
+            </div>
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 12 }}>{ru.project.reportDetails}</summary>
+              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, margin: '4px 0' }}>{genResult.report}</pre>
+            </details>
+          </div>
+        )}
+        {genResult && !genResult.feasible && (
+          <div style={{ ...errorStyle, marginTop: 8 }}>
+            <div>{ru.project.infeasibleLead}</div>
+            <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: '4px 0' }}>
+              {infeasibleReason(genResult.report)}
+            </pre>
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 12 }}>{ru.project.reportDetails}</summary>
+              <pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, margin: '4px 0' }}>{genResult.report}</pre>
+            </details>
+          </div>
+        )}
+        {genError && (
+          <div style={{ ...errorStyle, marginTop: 8 }}>
+            <div>{ru.project.genErrorTitle} {genError.message}</div>
+            {genError.input && <div>{ru.project.genInputHint}</div>}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
 
-// Секция одной маски (ТЗ 04 §1): статус + Загрузить / Добавить / Удалить / Скачать.
+// Секция одной маски (docs-unified/04 §1.2): статус + Добавить / Удалить
+// (загрузка и скачивание файлов удалены — проектный режим).
 function MaskSection(props: {
   title: string;
   status: string;
   disabled: boolean;
-  dirty: boolean;
-  onUpload: () => void;
   onAdd: () => void;
   onRemove: () => void;
-  onDownload: () => void;
 }): JSX.Element {
   const s = props.disabled ? disabledBtnStyle : btnStyle;
   return (
@@ -474,29 +625,31 @@ function MaskSection(props: {
       <strong>{props.title}</strong>
       <div style={statusStyle}>{props.status}</div>
       <div style={rowStyle}>
-        <button type="button" style={s} disabled={props.disabled} title={props.disabled ? ru.grid.noSpec : undefined} onClick={props.onUpload}>
-          📂 {ru.buttons.load}
-        </button>
-        <button type="button" style={s} disabled={props.disabled} onClick={props.onAdd}>
+        <button type="button" style={s} disabled={props.disabled} title={props.disabled ? ru.grid.noSpec : undefined} onClick={props.onAdd}>
           {ru.files.addMask}
         </button>
         <button type="button" style={s} disabled={props.disabled} onClick={props.onRemove}>
           ✕ {ru.buttons.remove}
         </button>
       </div>
-      <div style={rowStyle}>
-        <button type="button" style={s} disabled={props.disabled} onClick={props.onDownload}>
-          ⬇ {ru.buttons.download}{props.dirty ? ' ●' : ''}
-        </button>
-      </div>
     </div>
   );
 }
 
-/** Целое > 0 из текстового поля; null — невалидно (сообщение TЗ V-GRID-DIMS показывает вызывающий). */
+/** Целое > 0 из текстового поля; null — невалидно. */
 function parsePositiveInt(s: string): number | null {
   const t = s.trim();
   if (!/^\d+$/.test(t)) return null;
   const v = Number(t);
   return Number.isInteger(v) && v > 0 ? v : null;
+}
+
+/** HTTP 404 FILE_NOT_FOUND — «файл не найден на сервере» (§1.3 п.3). */
+function isFileNotFound(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 404;
+}
+
+function errText(e: unknown): string {
+  if (e instanceof MaskParseError || e instanceof Error) return e.message;
+  return String(e);
 }

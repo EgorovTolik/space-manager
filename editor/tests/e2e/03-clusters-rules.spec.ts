@@ -1,21 +1,21 @@
-// ТЗ 06 §3.4: CRUD кластеров (добавить/изменить/удалить), правила (fillAll, запрещённая
-// пара типов) — изменения видны в UI и попадают в скачанный YAML.
+// docs-unified/06 §3.4: CRUD кластеров (добавить/изменить/удалить), правила (fillAll,
+// запрещённая пара типов) — изменения видны в UI и попадают в PUT …/files (spec.yaml).
 import { expect, test } from '@playwright/test';
 import * as yaml from 'js-yaml';
-import { readFileSync } from 'node:fs';
-import { downloadButtons, manageDialogs, specFileInput } from './helpers';
-import { EXAMPLES } from './fixtures';
+import { manageDialogs, mockProject, saveBtn, selectProject } from './helpers';
+import { SPEC_50X50 } from './fixtures';
 
 interface SpecModel {
   clusters: { id: string; type: string; areaPercent: number; shape: string }[];
   rules: { fillAll: boolean; adjacency: { forbidden: [string, string][] } };
 }
 
-test.describe('CRUD кластеров и правил (ТЗ 06 §3.4)', () => {
-  test('добавить/изменить/удалить кластер; fillAll и forbidden-пара → YAML', async ({ page }) => {
+test.describe('CRUD кластеров и правил (docs-unified/06 §3.4)', () => {
+  test('добавить/изменить/удалить кластер; fillAll и forbidden-пара → PUT spec.yaml', async ({ page }) => {
     manageDialogs(page, { action: 'accept' });
+    const cap = await mockProject(page, 'demo', { 'spec.yaml': SPEC_50X50 });
     await page.goto('/');
-    await specFileInput(page).setInputFiles(EXAMPLES.specBasic);
+    await selectProject(page, 'demo');
 
     const clustersPanel = page.locator('section.panel', { has: page.getByRole('heading', { name: 'Кластеры' }) });
     await expect(clustersPanel.getByText('Сумма долей: 51 %')).toBeVisible();
@@ -58,12 +58,14 @@ test.describe('CRUD кластеров и правил (ТЗ 06 §3.4)', () => {
     await rulesPanel.getByRole('button', { name: 'Добавить' }).first().click();
     await expect(rulesPanel.getByText('ROOM1 × ROOM2')).toBeVisible();
 
-    // ── Скачать спеку и сверить YAML ────────────────────────────────────────────
-    const [dl] = await Promise.all([page.waitForEvent('download'), downloadButtons(page).nth(0).click()]);
-    const model = yaml.load(readFileSync((await dl.path())!, 'utf8')) as SpecModel;
+    // ── Сохранить в проект и сверить PUT spec.yaml ──────────────────────────────
+    await saveBtn(page).click();
+    await expect.poll(() => cap.puts.length).toBe(1);
+    const model = yaml.load(cap.puts[0]['spec.yaml']) as SpecModel;
     expect(model.rules.fillAll).toBe(true);
     expect(model.rules.adjacency.forbidden).toEqual([['ROOM1', 'ROOM2']]);
-    // room9 удалён: в YAML его нет.
+    // room9 удалён: в speке его нет. Масок в проекте не было — файлов масок в PUT тоже нет.
     expect(model.clusters.map((c) => c.id)).toEqual(['room1', 'room2', 'corridor1']);
+    expect(Object.keys(cap.puts[0]).sort()).toEqual(['spec.yaml']);
   });
 });
