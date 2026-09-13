@@ -3,7 +3,10 @@
 
 export interface ProjectMeta {
   id: string | null;
+  /** Человекочитаемое имя проекта (показывается в UI). */
   name: string;
+  /** Стабильный slug = ключ всех API-маршрутов и URL-ссылок. */
+  slug: string;
   createdAt: string | null;
   updatedAt: string | null;
   latestResult: string | null;
@@ -78,8 +81,9 @@ export async function createProject(name: string): Promise<ProjectMeta> {
   return body.project;
 }
 
-export async function renameProject(name: string, newName: string): Promise<ProjectMeta> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(name)}/rename`, {
+/** Замечание 2: меняет только человекочитаемое имя; slug (и каталог) не меняется. */
+export async function renameProject(slug: string, newName: string): Promise<ProjectMeta> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(slug)}/rename`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: newName }),
@@ -88,8 +92,8 @@ export async function renameProject(name: string, newName: string): Promise<Proj
   return body.project;
 }
 
-export async function deleteProject(name: string): Promise<void> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(name)}`, { method: 'DELETE' });
+export async function deleteProject(slug: string): Promise<void> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(slug)}`, { method: 'DELETE' });
   if (res.status === 204) return;
   throw await toApiError(res);
 }
@@ -108,8 +112,8 @@ export async function importZip(file: File): Promise<ImportOutcome> {
 // ТЗ 02 §6.13 — preview (список; отдача картинки — через URL)
 // ---------------------------------------------------------------------------
 
-export async function getPreviews(name: string): Promise<PreviewEntry[]> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(name)}/previews`);
+export async function getPreviews(slug: string): Promise<PreviewEntry[]> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(slug)}/previews`);
   const body = await json<{ previews: PreviewEntry[] }>(res);
   return body.previews;
 }

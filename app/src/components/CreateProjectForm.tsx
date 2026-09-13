@@ -1,10 +1,11 @@
 // Inline-форма создания проекта в шапке (ТЗ 03 §2): поле имени + [Создать]/[Отмена].
-// Валидация slug ДО отправки; ошибки API (409 и пр.) — inline под полем.
+// Замечание 2: произвольное человекочитаемое имя (кириллица/пробелы/регистр);
+// slug генерирует сервер. Валидация display-name ДО отправки; ошибки API — inline.
 import { useState } from 'react';
 
 import { ru } from '../i18n/ru';
 import { ApiRequestError } from '../lib/api';
-import { isValidSlug } from '../lib/slug';
+import { isValidProjectName } from '../lib/slug';
 
 interface CreateProjectFormProps {
   /** Бросает ApiRequestError при ошибке — форма показывает её inline. */
@@ -18,8 +19,8 @@ export default function CreateProjectForm({ onSubmit, onCancel }: CreateProjectF
   const [busy, setBusy] = useState(false);
 
   const submit = async (): Promise<void> => {
-    if (!isValidSlug(value)) {
-      setError(ru.create.invalidSlug);
+    if (!isValidProjectName(value)) {
+      setError(ru.create.invalidName);
       return;
     }
     setBusy(true);

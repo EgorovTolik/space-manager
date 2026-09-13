@@ -17,7 +17,7 @@ import {
   createProject,
   deleteProject,
   importProjectFromZip,
-  isValidSlug,
+  isValidProjectName,
   listProjectFiles,
   listProjects,
   nextPreviewName,
@@ -208,7 +208,7 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
         projects: entries.map((e) =>
           e.meta
             ? {
-                ...e.meta,
+                ...e.meta, // id, name (display), slug, createdAt, updatedAt, latestResult
                 sizeBytes: e.sizeBytes,
                 resultsCount: e.resultsCount,
                 previewsCount: e.previewsCount,
@@ -216,7 +216,8 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
               }
             : {
                 id: null,
-                name: e.name,
+                name: e.slug, // display-name неизвестен — показываем имя каталога
+                slug: e.slug,
                 createdAt: null,
                 updatedAt: null,
                 latestResult: null,
@@ -231,30 +232,36 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
     }),
   );
 
-  // 6.3 создание проекта
+  // 6.3 создание проекта (замечание 2): тело { name } — человекочитаемое имя;
+  // slug генерируется сервером транслитерацией и возвращается в ответе.
   app.post(
     '/api/projects',
     json,
     asyncH(async (req, res) => {
-      const name = (req.body as { name?: unknown } | undefined)?.name;
-      if (typeof name !== 'string' || !isValidSlug(name)) {
-        throw ApiError.invalidName(`Имя «${String(name)}» не проходит регламент slug`);
+      const rawName: unknown = (req.body as { name?: unknown } | undefined)?.name;
+      if (!isValidProjectName(rawName)) {
+        throw ApiError.invalidName(
+          `Имя «${String(rawName)}» не проходит регламент имён проекта (1–64 символа, без «/» и \\0)`,
+        );
       }
-      const meta = await createProject(cfg.workspaceDir, name, cfg.now);
+      const meta = await createProject(cfg.workspaceDir, rawName as string, cfg.now);
       res.status(201).json({ project: meta });
     }),
   );
 
-  // 6.4 переименование
+  // 6.4 переименование (замечание 2): меняет только display-name в project.json;
+  // каталог/slug не изменяются. Нарушение регламента имени → 422 UNPROCESSABLE.
   app.patch(
     '/api/projects/:p/rename',
     json,
     asyncH(async (req, res) => {
-      const name = (req.body as { name?: unknown } | undefined)?.name;
-      if (typeof name !== 'string' || !isValidSlug(name)) {
-        throw ApiError.invalidName(`Имя «${String(name)}» не проходит регламент slug`);
+      const rawName: unknown = (req.body as { name?: unknown } | undefined)?.name;
+      if (!isValidProjectName(rawName)) {
+        throw ApiError.unprocessable(
+          `Имя «${String(rawName)}» не проходит регламент имён проекта (1–64 символа, без «/» и \\0)`,
+        );
       }
-      const meta = await renameProject(cfg.workspaceDir, req.params.p, name, cfg.now);
+      const meta = await renameProject(cfg.workspaceDir, req.params.p, rawName as string, cfg.now);
       res.json({ project: meta });
     }),
   );

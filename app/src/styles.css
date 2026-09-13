@@ -79,9 +79,16 @@ button.danger:hover:not(:disabled) {
   background: #fbd2d2;
 }
 
+/* Замечание 3: фиксированные одинаковые размеры у обеих иконок карточки
+   (✎ / 🗑) — тот же бокс, что у .btn-link; содержимое по центру. */
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  min-height: 27px;
+  padding: 3px 8px;
   margin: 2px 4px 2px 0;
-  padding: 2px 7px;
 }
 
 /* Ссылки, стилизованные как кнопки (ТЗ 03 §2: <a href> для навигации/архива). */

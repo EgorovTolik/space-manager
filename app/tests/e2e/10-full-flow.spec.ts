@@ -68,7 +68,7 @@ test.describe.serial('сквозной сценарий: проект → ред
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Space Manager · проекты' })).toBeVisible();
     await page.getByRole('button', { name: '＋ Создать проект' }).first().click();
-    await page.getByPlaceholder('имя проекта (a–z, 0–9, `_`, `-`)').fill(PROJECT);
+    await page.getByPlaceholder('имя проекта (напр., «Офис Б», до 64 символов)').fill(PROJECT);
     await page.getByRole('button', { name: 'Создать', exact: true }).click();
 
     const card = page.locator('.card', { hasText: PROJECT });

@@ -4,7 +4,9 @@
 import { expect, test } from '@playwright/test';
 
 const CREATE_BTN = '＋ Создать проект';
-const NAME_PLACEHOLDER = 'имя проекта (a–z, 0–9, `_`, `-`)';
+// Замечание 2: произвольные display-name (кириллица/пробелы/регистр);
+// slug генерирует сервер — ссылки используют его.
+const NAME_PLACEHOLDER = 'имя проекта (напр., «Офис Б», до 64 символов)';
 
 test('smoke: создание → карточка → переименование → удаление', async ({ page }) => {
   await page.goto('/');
@@ -33,21 +35,33 @@ test('smoke: создание → карточка → переименован�
     '/api/projects/smoke-p1/archive',
   );
 
-  // --- Валидация slug в форме ------------------------------------------------
+  // --- Валидация имени в форме (замечание 2) ---------------------------------
+  // «Пробелы и кириллица» допустимы; запрещён только символ «/».
   await page.getByRole('button', { name: CREATE_BTN }).click();
-  await page.getByPlaceholder(NAME_PLACEHOLDER).fill('Bad Name');
+  await page.getByPlaceholder(NAME_PLACEHOLDER).fill('Bad/Name');
   await page.getByRole('button', { name: 'Создать', exact: true }).click();
-  await expect(page.getByText(/Допустимые символы/)).toBeVisible();
+  await expect(page.getByText(/запрещён символ/)).toBeVisible();
   await page.getByRole('button', { name: 'Отмена' }).click();
 
-  // --- Переименование ---------------------------------------------------------
+  // --- Переименование (замечание 2) -------------------------------------------
+  // Меняется только display-name; slug стабилен — ссылки сохраняют проект smoke-p1.
+  const renamed = page.locator('.card', { hasText: 'smoke-p2' });
   await card.getByRole('button', { name: 'Переименовать проект smoke-p1' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await page.getByLabel('новое имя проекта').fill('smoke-p2');
   await page.getByRole('button', { name: 'Сохранить' }).click();
-  await expect(page.locator('.card', { hasText: 'smoke-p2' })).toBeVisible();
+  await expect(renamed).toBeVisible();
   await expect(dialog).toHaveCount(0);
+  // Ссылки по-прежнему используют исходный slug.
+  await expect(renamed.getByRole('link', { name: 'Редактор' })).toHaveAttribute(
+    'href',
+    '/editor?project=smoke-p1',
+  );
+  await expect(renamed.getByRole('link', { name: '⬇ Архив' })).toHaveAttribute(
+    'href',
+    '/api/projects/smoke-p1/archive',
+  );
 
   // --- Удаление с подтверждением ----------------------------------------------
   await page.getByRole('button', { name: 'Удалить проект smoke-p2' }).click();

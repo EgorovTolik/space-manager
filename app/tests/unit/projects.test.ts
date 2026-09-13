@@ -5,7 +5,12 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { api, EXPECTED_MASK, EXPECTED_SPEC, startServer, type TestCtx } from './helpers.js';
-import { SPEC_TEMPLATE, MASK_TEMPLATE } from '../../server/workspace.js';
+import {
+  generateProjectSlug,
+  slugFromName,
+  SPEC_TEMPLATE,
+  MASK_TEMPLATE,
+} from '../../server/workspace.js';
 
 let ctx: TestCtx;
 
@@ -20,15 +25,17 @@ describe('CRUD проектов (ТЗ 05 §3.1)', () => {
   it('create → структура на диске: 4 файла, шаблон побайтово по ТЗ 02 §4', async () => {
     const res = await api(ctx, 'POST', '/api/projects', { name: 'demo' });
     expect(res.status).toBe(201);
-    const project = (res.json as { project: Record<string, unknown> }).project;
-    expect(project.name).toBe('demo');
+    const project = (res.json as {
+      project: { id: string; name: string; slug: string; createdAt: string; updatedAt: string; latestResult: null };
+    }).project;
+    expect(project.name).toBe('demo'); // display-name
+    expect(project.slug).toBe('demo'); // slug из имени (латиница)
     expect(project.latestResult).toBeNull();
-    expect(typeof project.id).toBe('string');
-    expect((project.id as string).length).toBe(36); // UUID v4
+    expect(project.id.length).toBe(36); // UUID v4
     expect(typeof project.createdAt).toBe('string');
     expect(project.createdAt).toBe(project.updatedAt);
 
-    const dir = path.join(ctx.ws, 'demo');
+    const dir = path.join(ctx.ws, 'demo'); // каталог = slug
     // spec.yaml побайтово = эталон ТЗ 02 §4.1 (hardcoded — не константа модуля)
     expect(await fsp.readFile(path.join(dir, 'spec.yaml'), 'utf8')).toBe(EXPECTED_SPEC);
     // маски — 20×20 точек с завершающим \n (ТЗ 02 §4.2)
@@ -45,23 +52,20 @@ describe('CRUD проектов (ТЗ 05 §3.1)', () => {
     expect(meta.id).toBe(project.id);
   });
 
-  it('create с плохим именем → 400 INVALID_NAME, каталог не создан', async () => {
-    for (const bad of ['Abc', 'a b', 'x'.repeat(41), '..', '.hidden', '', 'a/b']) {
+  it('create с нарушенным регламентом имени → 400 INVALID_NAME, каталог не создан', async () => {
+    // Замечание 2: кириллица/пробелы/регистр — валидные display-name; красные — только
+    // пустое, >64, «/», \0 и non-string.
+    for (const bad of ['', 'x'.repeat(65), 'a/b', '/x', 'a\u0000b']) {
       const res = await api(ctx, 'POST', '/api/projects', { name: bad });
       expect(res.status).toBe(400);
       expect((res.json as { error: string }).error).toBe('INVALID_NAME');
     }
-    // тело без поля name
-    const noName = await api(ctx, 'POST', '/api/projects', {});
-    expect(noName.status).toBe(400);
+    // тело без поля name / non-string
+    for (const body of [{}, { name: 42 }, { name: null }]) {
+      const res = await api(ctx, 'POST', '/api/projects', body);
+      expect(res.status).toBe(400);
+    }
     expect(fs.readdirSync(ctx.ws)).toEqual([]);
-  });
-
-  it('create дубликат → 409 PROJECT_EXISTS', async () => {
-    expect((await api(ctx, 'POST', '/api/projects', { name: 'dup' })).status).toBe(201);
-    const res = await api(ctx, 'POST', '/api/projects', { name: 'dup' });
-    expect(res.status).toBe(409);
-    expect((res.json as { error: string }).error).toBe('PROJECT_EXISTS');
   });
 
   it('list: порядок updatedAt desc (при равенстве — name asc), метрики верны', async () => {
@@ -111,38 +115,50 @@ describe('CRUD проектов (ТЗ 05 §3.1)', () => {
     expect(res.json).toEqual({ projects: [] });
   });
 
-  it('rename: каталог переименован, json обновлён; коллизия → 409, старый на месте', async () => {
+  it('rename (замечание 2): меняется ТОЛЬКО display-name; каталог и slug не изменяются', async () => {
     expect((await api(ctx, 'POST', '/api/projects', { name: 'old' })).status).toBe(201);
     const before = JSON.parse(await fsp.readFile(path.join(ctx.ws, 'old', 'project.json'), 'utf8')) as {
-      updatedAt: string;
       id: string;
     };
 
-    const res = await api(ctx, 'PATCH', '/api/projects/old/rename', { name: 'new' });
+    const res = await api(ctx, 'PATCH', '/api/projects/old/rename', { name: 'Новое Имя' });
     expect(res.status).toBe(200);
-    const project = (res.json as { project: Record<string, unknown> }).project;
-    expect(project.name).toBe('new');
+    const project = (res.json as { project: { name: string; slug: string; id: string } }).project;
+    expect(project.name).toBe('Новое Имя');
+    expect(project.slug).toBe('old'); // slug стабилен — ссылки сохраняются
     expect(project.id).toBe(before.id);
-    expect(!fs.existsSync(path.join(ctx.ws, 'old'))).toBe(true);
-    expect(fs.existsSync(path.join(ctx.ws, 'new'))).toBe(true);
-    const after = JSON.parse(await fsp.readFile(path.join(ctx.ws, 'new', 'project.json'), 'utf8')) as {
+
+    // Каталог НЕ переименован; project.json: новое имя, старый slug.
+    expect(fs.existsSync(path.join(ctx.ws, 'old'))).toBe(true);
+    const statNew = await fsp.stat(path.join(ctx.ws, 'Новое Имя')).catch(() => null);
+    expect(statNew).toBeNull();
+    const after = JSON.parse(await fsp.readFile(path.join(ctx.ws, 'old', 'project.json'), 'utf8')) as {
       name: string;
+      slug: string;
       id: string;
       updatedAt: string;
     };
-    expect(after.name).toBe('new');
+    expect(after.name).toBe('Новое Имя');
+    expect(after.slug).toBe('old');
     expect(after.id).toBe(before.id);
+    expect(typeof after.updatedAt).toBe('string');
+  });
 
-    // Коллизия: новое имя занято → 409, проект не тронут.
-    await api(ctx, 'POST', '/api/projects', { name: 'taken' });
-    const clash = await api(ctx, 'PATCH', '/api/projects/new/rename', { name: 'taken' });
-    expect(clash.status).toBe(409);
-    expect((clash.json as { error: string }).error).toBe('PROJECT_EXISTS');
-    expect(fs.existsSync(path.join(ctx.ws, 'new'))).toBe(true);
+  it('rename до дублирующегося display-name → разрешено (уникален slug, а не имя)', async () => {
+    await api(ctx, 'POST', '/api/projects', { name: 'Демо' }); // demo
+    await api(ctx, 'POST', '/api/projects', { name: 'Demo' }); // demo-2
+    const res = await api(ctx, 'PATCH', '/api/projects/demo-2/rename', { name: 'Демо' });
+    expect(res.status).toBe(200);
+    expect((res.json as { project: { name: string } }).project.name).toBe('Демо');
+  });
 
-    // Плохое имя → 400.
-    const bad = await api(ctx, 'PATCH', '/api/projects/new/rename', { name: 'Bad Name' });
-    expect(bad.status).toBe(400);
+  it('rename с нарушенным регламентом имени → 422 UNPROCESSABLE (замечание 2)', async () => {
+    await api(ctx, 'POST', '/api/projects', { name: 'a' });
+    for (const bad of ['a/b', '/x', '', 'x'.repeat(65), 'a\u0000b']) {
+      const res = await api(ctx, 'PATCH', '/api/projects/a/rename', { name: bad });
+      expect(res.status).toBe(422);
+      expect((res.json as { error: string }).error).toBe('UNPROCESSABLE');
+    }
   });
 
   it('delete: каталог удалён полностью (включая preview/); повторный delete → 404', async () => {
@@ -206,5 +222,48 @@ describe('CRUD проектов (ТЗ 05 §3.1)', () => {
     const projects = (res.json as { projects: unknown[] }).projects;
     expect(projects.length).toBe(30);
     expect(elapsed).toBeLessThan(50);
+  });
+});
+
+// Замечание 2: генерация slug из display-name (транслитерация + уникализация).
+describe('slug из имени проекта (замечание 2)', () => {
+  it('slugFromName: транслит кириллицы, регистр, санитизация', () => {
+    expect(slugFromName('Офис Б-2')).toBe('ofis-b-2');
+    expect(slugFromName('Demo')).toBe('demo');
+    expect(slugFromName('a b  c')).toBe('a-b-c');
+    expect(slugFromName('Щука и Юля')).toBe('schuka-i-yulya');
+    expect(slugFromName('проект №1 (основной)')).toBe('proekt-1-osnovnoy');
+  });
+
+  it('slugFromName: пусто после санитизации → null; обрезка до 40', () => {
+    expect(slugFromName('…')).toBeNull();
+    expect(slugFromName('a'.repeat(50))).toBe('a'.repeat(40));
+  });
+
+  it('generateProjectSlug: свободный slug без суффикса; коллизии → -2, -3', async () => {
+    await fsp.mkdir(path.join(ctx.ws, 'demo'), { recursive: true });
+    await fsp.mkdir(path.join(ctx.ws, 'demo-2'), { recursive: true });
+
+    expect(await generateProjectSlug(ctx.ws, 'Демо')).toEqual({ slug: 'demo-3', suffix: 3 });
+    expect(await generateProjectSlug(ctx.ws, 'Свободный')).toEqual({ slug: 'svobodnyy', suffix: 1 });
+    // имя без латиницы → project-<uuid8>
+    const fallback = await generateProjectSlug(ctx.ws, '…');
+    expect(fallback.slug).toMatch(/^project-[0-9a-f]{8}$/);
+    expect(fallback.suffix).toBe(1);
+  });
+
+  it('legacy project.json без поля slug: slug берётся из имени каталога', async () => {
+    await api(ctx, 'POST', '/api/projects', { name: 'legacy' });
+    const metaPath = path.join(ctx.ws, 'legacy', 'project.json');
+    const meta = JSON.parse(await fsp.readFile(metaPath, 'utf8')) as Record<string, unknown>;
+    delete meta.slug; // имитация старого формата
+    await fsp.writeFile(metaPath, JSON.stringify(meta));
+
+    const res = await api(ctx, 'GET', '/api/projects');
+    const entry = (res.json as { projects: { name: string; slug: string }[] }).projects.find(
+      (p) => p.slug === 'legacy',
+    );
+    expect(entry).toBeDefined();
+    expect(entry?.slug).toBe('legacy'); // из каталога, а не из повреждённого/пустого поля
   });
 });

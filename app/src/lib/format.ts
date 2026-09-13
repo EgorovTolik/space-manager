@@ -19,21 +19,21 @@ export function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
-/** Ссылка на редактор проекта (ТЗ 03 §6, 04 §2.5). */
-export function editorPath(name: string): string {
-  return `/editor?project=${encodeURIComponent(name)}`;
+/** Ссылка на редактор проекта (ТЗ 03 §6, 04 §2.5); параметр ?project= — slug. */
+export function editorPath(slug: string): string {
+  return `/editor?project=${encodeURIComponent(slug)}`;
 }
 
 /**
  * Ссылка на viewer3d (ТЗ 03 §6, 04 §3.5): `?result=` добавляется только если
  * у проекта есть latestResult.
  */
-export function viewerPath(name: string, latestResult: string | null): string {
-  const base = `/viewer3d?project=${encodeURIComponent(name)}`;
+export function viewerPath(slug: string, latestResult: string | null): string {
+  const base = `/viewer3d?project=${encodeURIComponent(slug)}`;
   return latestResult ? `${base}&result=${encodeURIComponent(latestResult)}` : base;
 }
 
 /** URL картинки предпросмотра (ТЗ 02 §6.13). */
-export function previewUrl(projectName: string, fileName: string): string {
-  return `/api/projects/${encodeURIComponent(projectName)}/preview?file=${encodeURIComponent(fileName)}`;
+export function previewUrl(slug: string, fileName: string): string {
+  return `/api/projects/${encodeURIComponent(slug)}/preview?file=${encodeURIComponent(fileName)}`;
 }

@@ -1,5 +1,7 @@
 // Карточка проекта (ТЗ 03 §1/§2): метрики, действия, ссылки на editor/viewer3d,
 // лента превью (≤8 + «+N»). Для corrupted-проектов всё неактивно кроме удаления.
+// Замечание 2: заголовок — человекочитаемое имя (project.name), все URL/ссылки
+// используют стабильный project.slug.
 import { ru, t } from '../i18n/ru';
 import type { PreviewEntry, ProjectMeta } from '../lib/api';
 import { editorPath, formatDate, formatSize, previewUrl, viewerPath } from '../lib/format';
@@ -37,6 +39,7 @@ export default function ProjectCard({ project, previews, onRename, onDelete, onP
       </p>
 
       <div className="card-actions">
+        {/* Замечание 3: обе иконки — один класс .icon-btn с фиксированными размерами. */}
         <button
           type="button"
           className="icon-btn"
@@ -67,13 +70,13 @@ export default function ProjectCard({ project, previews, onRename, onDelete, onP
           </>
         ) : (
           <>
-            <a className="btn-link" href={editorPath(project.name)}>
+            <a className="btn-link" href={editorPath(project.slug)}>
               {ru.card.editor}
             </a>
-            <a className="btn-link" href={viewerPath(project.name, project.latestResult)}>
+            <a className="btn-link" href={viewerPath(project.slug, project.latestResult)}>
               {ru.card.viewer}
             </a>
-            <a className="btn-link" href={`/api/projects/${encodeURIComponent(project.name)}/archive`}>
+            <a className="btn-link" href={`/api/projects/${encodeURIComponent(project.slug)}/archive`}>
               {ru.card.archive}
             </a>
           </>
@@ -87,7 +90,7 @@ export default function ProjectCard({ project, previews, onRename, onDelete, onP
             {shown.map((e) => (
               <img
                 key={e.name}
-                src={previewUrl(project.name, e.name)}
+                src={previewUrl(project.slug, e.name)}
                 alt={e.name}
                 title={e.name}
                 loading="lazy" // ТЗ 03 §3: ленивая подгрузка

@@ -26,6 +26,64 @@ export function isValidSlug(name: string): boolean {
   return SLUG_RE.test(name);
 }
 
+// ---------------------------------------------------------------------------
+// Двухуровневое имя проекта (замечание 2):
+//   name — человекочитаемое (любые символы кроме «/» и \0, длина 1..64);
+//   slug — стабильный машинный идентификатор каталога (регламент SLUG_RE).
+// ---------------------------------------------------------------------------
+
+export const DISPLAY_NAME_MAX = 64;
+
+/** true, если имя проходит регламент display-name проекта (non-string → false). */
+export function isValidProjectName(name: unknown): boolean {
+  if (typeof name !== 'string') return false;
+  if (name.length < 1 || name.length > DISPLAY_NAME_MAX) return false;
+  if (name.includes('/') || name.includes('\0')) return false;
+  return true;
+}
+
+/** Кириллица → латиница (остальные символы транслируются как есть). */
+const TRANSLIT: Record<string, string> = {
+  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
+  й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't',
+  у: 'u', ф: 'f', х: 'h', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y',
+  ь: '', э: 'e', ю: 'yu', я: 'ya',
+};
+
+/**
+ * Чистая генерация slug из display-name: транслитерация, нижний регистр,
+ * всё не-[a-z0-9_-] → «-», обрезка до 40. null — если после санитизации пусто.
+ */
+export function slugFromName(name: string): string | null {
+  let out = name.toLowerCase();
+  out = [...out].map((ch) => TRANSLIT[ch] ?? ch).join('');
+  out = out.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (out.length > 40) out = out.slice(0, 40).replace(/-+$/g, '');
+  return isValidSlug(out) ? out : null;
+}
+
+/**
+ * Уникальный slug в workspace: base из имени; при коллизии — суффиксы -2, -3…
+ * (base укорачивается до 37, чтобы итог не превышал 40). Если санитизация пуста —
+ * `project-<uuid8>`. Возвращает [slug, appliedSuffix] (suffix=1 → без суффикса).
+ */
+export async function generateProjectSlug(
+  workspace: string,
+  name: string,
+): Promise<{ slug: string; suffix: number }> {
+  let base = slugFromName(name);
+  if (base === null) base = `project-${crypto.randomUUID().slice(0, 8)}`;
+  if (base.length > 37) base = base.slice(0, 37).replace(/-+$/g, '');
+  let candidate = base;
+  let suffix = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (!(await projectExists(workspace, candidate))) return { slug: candidate, suffix };
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+  }
+}
+
 /** Имя файла для API-чтения/записи (ТЗ 02 §3.2 «произвольный файл»). */
 export function isValidFileName(name: string): boolean {
   if (!ARBITRARY_FILE_RE.test(name)) return false;
@@ -139,7 +197,10 @@ export const MASK_TEMPLATE: string = ('.'.repeat(20) + '\n').repeat(20);
 
 export interface ProjectMeta {
   id: string;
+  /** Человекочитаемое имя (любые символы кроме «/» и \0, 1..64). */
   name: string;
+  /** Стабильный slug = имя каталога в workspace; ключ всех API-маршрутов. */
+  slug: string;
   createdAt: string;
   updatedAt: string;
   latestResult: string | null;
@@ -168,9 +229,12 @@ export async function readMeta(projectDir: string): Promise<ProjectMeta> {
     if (typeof data.id !== 'string' || typeof data.name !== 'string') {
       throw new Error('bad shape');
     }
+    // slug всегда авторитетен из имени каталога (legacy project.json без поля
+    // slug — имя каталога и было именем проекта).
     return {
       id: data.id,
       name: data.name,
+      slug: path.basename(projectDir),
       createdAt: String(data.createdAt ?? ''),
       updatedAt: String(data.updatedAt ?? ''),
       latestResult: typeof data.latestResult === 'string' ? data.latestResult : null,
@@ -222,23 +286,31 @@ export async function requireProjectDir(workspace: string, slug: string): Promis
 // CRUD проектов (ТЗ 02 §6.3–§6.5)
 // ---------------------------------------------------------------------------
 
+/**
+ * Создание проекта по человекочитаемому имени (замечание 2): slug генерируется
+ * из имени транслитерацией с уникализацией; каталог = <workspace>/<slug>/.
+ */
 export async function createProject(
   workspace: string,
-  slug: string,
+  displayName: string,
   now: Clock,
 ): Promise<ProjectMeta> {
-  if (!isValidSlug(slug)) {
-    throw ApiError.invalidName(`Имя «${slug}» не проходит регламент slug`);
+  if (!isValidProjectName(displayName)) {
+    throw ApiError.invalidName(
+      `Имя «${displayName}» не проходит регламент имён проекта (1–64 символа, без «/» и \\0)`,
+    );
   }
+  const { slug } = await generateProjectSlug(workspace, displayName);
   const dir = path.join(workspace, slug);
   if (await projectExists(workspace, slug)) {
-    throw ApiError.projectExists(slug);
+    throw ApiError.projectExists(slug); // теоретически недостижимо — гонка
   }
   await fsp.mkdir(dir, { recursive: false });
   const iso = now().toISOString();
   const meta: ProjectMeta = {
     id: crypto.randomUUID(),
-    name: slug,
+    name: displayName,
+    slug,
     createdAt: iso,
     updatedAt: iso,
     latestResult: null,
@@ -250,25 +322,25 @@ export async function createProject(
   return meta;
 }
 
+/**
+ * Переименование (замечание 2): меняет ТОЛЬКО человекочитаемое имя в
+ * project.json. Каталог и slug НЕ изменяются — все API-ссылки сохраняются.
+ */
 export async function renameProject(
   workspace: string,
-  oldSlug: string,
-  newSlug: string,
+  slug: string,
+  newName: string,
   now: Clock,
 ): Promise<ProjectMeta> {
-  if (!isValidSlug(newSlug)) {
-    throw ApiError.invalidName(`Имя «${newSlug}» не проходит регламент slug`);
+  if (!isValidProjectName(newName)) {
+    throw ApiError.unprocessable(
+      `Имя «${newName}» не проходит регламент имён проекта (1–64 символа, без «/» и \\0)`,
+    );
   }
-  const oldDir = await requireProjectDir(workspace, oldSlug);
-  if (oldSlug === newSlug) return readMeta(oldDir);
-  if (await projectExists(workspace, newSlug)) {
-    throw ApiError.projectExists(newSlug);
-  }
-  const meta = await readMeta(oldDir); // corrupted → PROJECT_CORRUPTED
-  const newDir = path.join(workspace, newSlug);
-  await fsp.rename(oldDir, newDir);
-  const updated: ProjectMeta = { ...meta, name: newSlug, updatedAt: now().toISOString() };
-  await writeMeta(newDir, updated);
+  const dir = await requireProjectDir(workspace, slug);
+  const meta = await readMeta(dir); // corrupted → PROJECT_CORRUPTED
+  const updated: ProjectMeta = { ...meta, name: newName, updatedAt: now().toISOString() };
+  await writeMeta(dir, updated);
   return updated;
 }
 
@@ -327,7 +399,8 @@ export async function listProjectFiles(
 }
 
 export interface ProjectListEntry {
-  name: string;
+  /** Имя каталога (= slug проекта). */
+  slug: string;
   meta: ProjectMeta | null;
   corrupted: boolean;
   sizeBytes: number;
@@ -345,8 +418,8 @@ export async function listProjects(workspace: string): Promise<ProjectListEntry[
   }
   const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
   const out: ProjectListEntry[] = [];
-  for (const name of dirs) {
-    const dir = path.join(workspace, name);
+  for (const slug of dirs) {
+    const dir = path.join(workspace, slug);
     let meta: ProjectMeta | null = null;
     let corrupted = false;
     try {
@@ -365,7 +438,7 @@ export async function listProjects(workspace: string): Promise<ProjectListEntry[
       // preview/ может не существовать — 0
     }
     out.push({
-      name,
+      slug,
       meta,
       corrupted,
       sizeBytes: await dirSizeBytes(dir),
@@ -374,13 +447,13 @@ export async function listProjects(workspace: string): Promise<ProjectListEntry[
       filesCount: files.length,
     });
   }
-  // updatedAt desc; повреждённые (без meta) — в конец; при равенстве — name asc.
+  // updatedAt desc; повреждённые (без meta) — в конец; при равенстве — slug asc.
   out.sort((a, b) => {
     if (!!a.meta !== !!b.meta) return a.meta ? -1 : 1;
     const au = a.meta?.updatedAt ?? '';
     const bu = b.meta?.updatedAt ?? '';
     if (au !== bu) return au < bu ? 1 : -1;
-    return a.name.localeCompare(b.name);
+    return a.slug.localeCompare(b.slug);
   });
   return out;
 }
@@ -459,15 +532,6 @@ export interface ImportOutcome {
   skipped: ImportSkipped[];
 }
 
-function sanitizeSlugFromText(text: string): string | null {
-  const slug = text
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
-  return isValidSlug(slug) ? slug : null;
-}
-
 /** Проверка имени записи zip на traversal (ТЗ 02 §6.6 п.5). */
 function assertZipEntrySafe(entryName: string): string {
   if (entryName.startsWith('/') || entryName.includes('\\')) {
@@ -522,31 +586,35 @@ export async function importProjectFromZip(
   }
   const relNames = rawEntries.map((n) => (prefix ? n.slice(prefix.length) : n));
 
-  // 3) Имя проекта: ?name= → единственная верхняя папка → imported; коллизии -2, -3…
-  let baseName: string;
+  // 3) Имя проекта (замечание 2): display-name из ?name= / верхней папки / 'imported';
+  // slug генерируется транслитерацией. Без явного имени коллизии slug снимаются
+  // суффиксами -2, -3… (они же отражаются в display-name — имя остаётся уникальным
+  // визуально). Явное ?name= без суффиксов: коллизия → PROJECT_EXISTS.
+  const baseDisplay =
+    requestedName !== undefined
+      ? requestedName
+      : prefix
+        ? prefix.slice(0, -1)
+        : 'imported';
+  let finalSlug: string;
+  let finalDisplay: string;
   if (requestedName !== undefined) {
-    if (!isValidSlug(requestedName)) {
-      throw ApiError.invalidName(`Имя «${requestedName}» не проходит регламент slug`);
+    if (!isValidProjectName(requestedName)) {
+      throw ApiError.invalidName(
+        `Имя «${requestedName}» не проходит регламент имён проекта (1–64 символа, без «/» и \\0)`,
+      );
     }
-    baseName = requestedName;
-  } else if (prefix) {
-    const fromFolder = sanitizeSlugFromText(prefix.slice(0, -1));
-    baseName = fromFolder ?? 'imported';
+    const base = slugFromName(requestedName) ?? `project-${crypto.randomUUID().slice(0, 8)}`;
+    finalSlug = base.length > 37 ? base.slice(0, 37).replace(/-+$/g, '') : base;
+    if (await projectExists(workspace, finalSlug)) {
+      throw ApiError.projectExists(`Проект «${requestedName}» уже существует`);
+    }
+    finalDisplay = requestedName;
   } else {
-    baseName = 'imported';
-  }
-  let finalName = baseName;
-  // Явное имя (?name=) без суффиксов: коллизия → PROJECT_EXISTS (ТЗ 02 §6.6).
-  if (requestedName === undefined) {
-    let suffix = 2;
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      if (!(await projectExists(workspace, finalName))) break;
-      finalName = `${baseName}-${suffix}`;
-      suffix += 1;
-    }
-  } else if (await projectExists(workspace, finalName)) {
-    throw ApiError.projectExists(`Проект «${finalName}» уже существует`);
+    const { slug, suffix } = await generateProjectSlug(workspace, baseDisplay);
+    finalSlug = slug;
+    // Суффикс уникализации отражаем и в имени: «imported-2», не два «imported».
+    finalDisplay = suffix > 1 ? `${baseDisplay}-${suffix}` : baseDisplay;
   }
 
   // 4) Приём файлов: basename по §3.2, без project.json / preview/ / *.zip.
@@ -572,7 +640,7 @@ export async function importProjectFromZip(
 
   imported.sort();
 
-  const dir = path.join(workspace, finalName);
+  const dir = path.join(workspace, finalSlug);
   await fsp.mkdir(dir, { recursive: false });
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory) continue;
@@ -602,7 +670,8 @@ export async function importProjectFromZip(
   const iso = now().toISOString();
   const meta: ProjectMeta = {
     id: crypto.randomUUID(),
-    name: finalName,
+    name: finalDisplay,
+    slug: finalSlug,
     createdAt: iso,
     updatedAt: iso,
     latestResult,

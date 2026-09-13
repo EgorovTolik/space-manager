@@ -221,10 +221,17 @@ describe('Импорт из zip (POST /import)', () => {
     expect(meta.latestResult).toBe('result-20260913-120500.txt');
   });
 
-  it('плохое ?name → 400 INVALID_NAME', async () => {
+  it('плохое ?name → 400 INVALID_NAME (замечание 2: «Bad Name» теперь валиден)', async () => {
     const zip = makeZip({ 'spec.yaml': 's' });
-    const res = await postRaw(ctx, '/api/projects/import?name=Bad Name', zip, 'application/zip');
+    const res = await postRaw(ctx, '/api/projects/import?name=a/b', zip, 'application/zip');
     expect(res.status).toBe(400);
     expect((res.json as { error: string }).error).toBe('INVALID_NAME');
+
+    // Имя с пробелом — валидное display-name; slug транслитерируется без пробелов.
+    const ok = await postRaw(ctx, '/api/projects/import?name=Bad Name', zip, 'application/zip');
+    expect(ok.status).toBe(201);
+    const project = (ok.json as { project: { name: string; slug: string } }).project;
+    expect(project.name).toBe('Bad Name');
+    expect(project.slug).toBe('bad-name');
   });
 });

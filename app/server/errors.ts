@@ -33,6 +33,10 @@ export class ApiError extends Error {
   static solverInput(message: string): ApiError {
     return new ApiError(422, 'SOLVER_INPUT', message);
   }
+  /** 422 — имя не проходит регламент display-name (замечание 2: PATCH rename). */
+  static unprocessable(message: string): ApiError {
+    return new ApiError(422, 'UNPROCESSABLE', message);
+  }
   static workspaceUnavailable(message: string): ApiError {
     return new ApiError(500, 'WORKSPACE_UNAVAILABLE', message);
   }

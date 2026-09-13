@@ -67,12 +67,13 @@ export default function App(): JSX.Element {
   }, [load]);
 
   // Ленивая подгрузка превью для карточек, у которых previewsCount > 0 (ТЗ 03 §3).
+  // Ключ — slug (замечание 2: display-name не обязателен уникальным).
   useEffect(() => {
     if (!projects) return;
     for (const p of projects) {
-      if (p.previewsCount > 0 && !(p.name in previews)) {
-        getPreviews(p.name)
-          .then((list) => setPreviews((m) => ({ ...m, [p.name]: list })))
+      if (p.previewsCount > 0 && !(p.slug in previews)) {
+        getPreviews(p.slug)
+          .then((list) => setPreviews((m) => ({ ...m, [p.slug]: list })))
           .catch(() => undefined); // превью не критичны: без миниатюр карточка валидна
       }
     }
@@ -104,7 +105,7 @@ export default function App(): JSX.Element {
 
   const handleRename = async (project: ProjectMeta, newName: string): Promise<void> => {
     try {
-      await renameProject(project.name, newName);
+      await renameProject(project.slug, newName); // замечание 2: меняется только display-name
       setModal({ type: 'none' });
       await load();
     } catch (e) {
@@ -115,7 +116,7 @@ export default function App(): JSX.Element {
   const handleDelete = async (project: ProjectMeta): Promise<void> => {
     setDeleteBusy(true);
     try {
-      await deleteProject(project.name); // 204
+      await deleteProject(project.slug); // 204
       setModal({ type: 'none' });
       await load();
     } catch (e) {
@@ -217,9 +218,9 @@ export default function App(): JSX.Element {
           <div className="cards">
             {projects.map((p) => (
               <ProjectCard
-                key={p.name}
+                key={p.slug}
                 project={p}
-                previews={previews[p.name]}
+                previews={previews[p.slug]}
                 onRename={() => setModal({ type: 'rename', project: p })}
                 onDelete={() => setModal({ type: 'delete', project: p })}
                 onPreview={(entry) => setModal({ type: 'preview', project: p, entry })}
@@ -246,7 +247,7 @@ export default function App(): JSX.Element {
       )}
       {modal.type === 'preview' && (
         <PreviewModal
-          url={previewUrl(modal.project.name, modal.entry.name)}
+          url={previewUrl(modal.project.slug, modal.entry.name)}
           name={modal.entry.name}
           mtimeIso={modal.entry.mtimeIso}
           onClose={() => setModal({ type: 'none' })}
