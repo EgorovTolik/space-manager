@@ -10,6 +10,9 @@ __pycache__/
 # Рабочее пространство единого сервиса (проекты на диске, ТЗ docs-unified/02 §1)
 workspace/
 
+# Конфигурация LLM с API-ключами (в git — только llm.config.example.json, ТЗ docs-llm/02 §1)
+llm.config.json
+
 # Служебные файлы
 .DS_Store
 .pi/

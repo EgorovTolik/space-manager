@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 
 import { ApiError } from './errors.js';
 import { createProjectQueue, runSolver } from './generate.js';
+import { loadLlmConfig } from './llm/config.js';
+import { fetchAllProviderModels } from './llm/models.js';
 import {
   archiveFileName,
   buildProjectArchive,
@@ -504,6 +506,33 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
       res.setHeader('Content-Type', 'image/png');
       res.setHeader('Cache-Control', 'no-cache'); // файл может пересоздаваться
       res.send(content);
+    }),
+  );
+
+  // LLM: провайдеры + модели (ТЗ docs-llm/06 §1.1). Ключи в ответе не передаются;
+  // без/с невалидным llm.config.json → { configured:false, reason } с кодом 200 (02 §5).
+  app.get(
+    '/api/llm/providers',
+    asyncH(async (_req, res) => {
+      const loaded = await loadLlmConfig();
+      if (!loaded.ok) {
+        res.json({ configured: false, reason: loaded.reason });
+        return;
+      }
+      const { config } = loaded;
+      // Конфиг перечитан; модели — авто-опрос {url}/v1/models с кэшем TTL (02 §4).
+      const discovered = await fetchAllProviderModels(config.providers);
+      res.json({
+        configured: true,
+        defaultModel: config.defaultModel,
+        providers: Object.entries(config.providers).map(([id, p]) => ({
+          id,
+          models: (discovered[id]?.models ?? []).map((modelId) => ({
+            id: modelId,
+            label: config.labels[`${id}/${modelId}`] ?? null,
+          })),
+        })),
+      });
     }),
   );
 
