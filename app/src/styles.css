@@ -1,0 +1,341 @@
+/* Менеджер проектов: стиль в тон editor/ и viewer3d/ — системный шрифт, панели
+   с заголовком, компактные кнопки, баннеры ошибок (#fde3e3). ТЗ 03 §1. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: #222;
+  background: #f2f4f7;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+/* --- Шапка ------------------------------------------------------------------ */
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+}
+
+.app-header h1 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+/* --- Кнопки (тот же стиль, что в viewer3d styles.css) ------------------------ */
+
+button {
+  font: inherit;
+  padding: 3px 8px;
+  margin: 2px 4px 2px 0;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #f4f6f8;
+}
+
+button:disabled {
+  color: #aaa;
+  cursor: default;
+  background: #f4f4f4;
+}
+
+button.danger {
+  border-color: #c99;
+  background: #fde3e3;
+  color: #900;
+}
+
+button.danger:hover:not(:disabled) {
+  background: #fbd2d2;
+}
+
+.icon-btn {
+  margin: 2px 4px 2px 0;
+  padding: 2px 7px;
+}
+
+/* Ссылки, стилизованные как кнопки (ТЗ 03 §2: <a href> для навигации/архива). */
+.btn-link {
+  display: inline-block;
+  font: inherit;
+  padding: 3px 8px;
+  margin: 2px 4px 2px 0;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #fff;
+  color: #222;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn-link:hover {
+  background: #f4f6f8;
+}
+
+/* Неактивные «кнопки» corrupted-карточек. */
+.btn-ghost {
+  display: inline-block;
+  font: inherit;
+  padding: 3px 8px;
+  margin: 2px 4px 2px 0;
+  border: 1px solid #ddd;
+  border-radius: 3px;
+  background: #f4f4f4;
+  color: #aaa;
+}
+
+/* --- Форма создания (inline под шапкой, ТЗ 03 §2) --------------------------- */
+
+.create-row {
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid #eee;
+}
+
+.inline-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+input {
+  font: inherit;
+  padding: 3px 8px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #fff;
+}
+
+input:focus {
+  outline: none;
+  border-color: #1565c0;
+}
+
+.field-error {
+  color: #900;
+  font-size: 12px;
+  width: 100%;
+}
+
+/* --- Баннеры (ТЗ 03 §4) ------------------------------------------------------ */
+
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.banner.error {
+  background: #fde3e3;
+  color: #900;
+  border-bottom: 1px solid #e5b0b0;
+}
+
+.banner.info {
+  background: #edf7ed;
+  color: #145a14;
+  border-bottom: 1px solid #cfe8cf;
+}
+
+/* --- Контент: сетка карточек (ТЗ 03 §1) ------------------------------------- */
+
+.content {
+  flex: 1;
+  padding: 8px 12px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 8px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.card h3 {
+  font-size: 14px;
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.card p {
+  margin: 2px 0;
+}
+
+.muted {
+  color: #888;
+  font-size: 12px;
+}
+
+.badge-warn {
+  background: #fff6d6;
+  border: 1px solid #e6d9a0;
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 11px;
+  color: #7a6400;
+}
+
+.card-actions {
+  margin-top: 4px;
+}
+
+.card-nav {
+  margin-top: 2px;
+}
+
+/* --- Превью (ТЗ 03 §3) -------------------------------------------------------- */
+
+.preview-block {
+  margin-top: 6px;
+}
+
+.preview-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+
+.preview-strip img {
+  height: 64px;
+  width: auto;
+  max-width: 120px;
+  object-fit: contain;
+  background: #f2f4f7;
+  border: 1px solid #e0e0e0;
+  border-radius: 3px;
+  padding: 2px;
+  cursor: zoom-in;
+}
+
+.preview-more {
+  font-size: 12px;
+}
+
+/* --- Пустое состояние --------------------------------------------------------- */
+
+.panel {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.empty-state {
+  max-width: 560px;
+  margin: 24px auto;
+  text-align: center;
+  padding: 24px;
+}
+
+.empty-state p {
+  margin: 0 0 10px;
+}
+
+/* --- Модальные окна (ТЗ 03 §2/§3) --------------------------------------------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  position: relative;
+  background: #fff;
+  border-radius: 6px;
+  padding: 14px 18px;
+  min-width: 380px;
+  max-width: 90vw;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
+}
+
+.modal.wide {
+  min-width: 0;
+  max-width: 92vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal h2 {
+  font-size: 15px;
+  margin: 0 0 10px;
+}
+
+.modal-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 0 7px;
+  line-height: 20px;
+  margin: 0;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.preview-full {
+  max-width: 86vw;
+  max-height: 75vh;
+  background: #f2f4f7;
+  border-radius: 3px;
+}
+
+.preview-caption {
+  margin: 0;
+}
