@@ -13,6 +13,7 @@ import { symbolPalette, UNKNOWN_SYMBOL_COLOR } from '../lib/palette';
 import type { WallBox } from '../lib/walls';
 import { presetCamera, roomFocus, type V3 } from './cameraMath';
 import { buildRoomFloorGeometry } from './roomFloor';
+import { applyWallOpacity } from './wallMaterial';
 import { getSnapshotTarget, setSnapshotHandler } from './snapshot';
 import { savePreview } from '../lib/api';
 import { snapshotFileName } from '../lib/timestamp';
@@ -285,7 +286,17 @@ function Walls({
   hidden: boolean;
 }) {
   const ref = useRef<THREE.InstancedMesh>(null);
+  const materialRef = useRef<THREE.MeshLambertMaterial>(null);
   const count = Math.max(boxes.length, 1);
+
+  // Прозрачность: применяем к ЖИВОМУ материалу без пересоздания меша (регрессия:
+  // при первой загрузке wallsOpacity=1 → opaque-материал, и изменение .opacity на
+  // смонтированном материале без needsUpdate визуально игнорируется three.js).
+  useEffect(() => {
+    const mat = materialRef.current;
+    if (mat === null) return;
+    applyWallOpacity(mat, opacity);
+  }, [opacity]);
 
   useEffect(() => {
     const mesh = ref.current;
@@ -313,7 +324,10 @@ function Walls({
   return (
     <instancedMesh key={count} ref={ref} args={[undefined, undefined, count]} frustumCulled={false}>
       <boxGeometry args={[1, 1, 1]} />
-      <meshLambertMaterial color={WALL_COLOR} transparent={opacity < 1} opacity={opacity} />
+      {/* props — только начальное состояние; дальнейшие изменения opacity идут через
+          materialRef + applyWallOpacity (эффект выше), иначе three.js не пересоберёт
+          шейдер при смене transparent. */}
+      <meshLambertMaterial ref={materialRef} color={WALL_COLOR} transparent={opacity < 1} opacity={opacity} />
     </instancedMesh>
   );
 }

@@ -43,6 +43,8 @@ body {
 .to-projects {
   font-size: 13px;
   font-weight: 600;
+  /* левый отступ как у редактора (контейнер тулбара с margin '6px 8px') */
+  margin-left: 8px;
   margin-right: 12px;
   padding: 5px 14px;
   background: #2e7d32;
@@ -203,6 +205,12 @@ button.active {
   vertical-align: -1px;
   margin-right: 4px;
   border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+/* Таблица шире узкой правой колонки (nowrap-колонки) — горизонтальная прокрутка
+   ВНУТРИ панели, а не переполнение контейнера. */
+.rooms-scroll {
+  overflow-x: auto;
 }
 
 .rooms-table {

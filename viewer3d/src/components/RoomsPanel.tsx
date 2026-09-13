@@ -34,42 +34,44 @@ export function RoomsPanel() {
       {report.rooms.length === 0 ? (
         <div className="muted">{ru.noRooms}</div>
       ) : (
-        <table className="rooms-table">
-          <thead>
-            <tr>
-              <th>{ru.roomsColLabel}</th>
-              <th>{ru.roomsColSymbol}</th>
-              <th>{ru.roomsColType}</th>
-              <th>{ru.roomsColCells}</th>
-              <th>{ru.roomsColArea}</th>
-              <th>{ru.roomsColStatus}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.rooms.map((room) => (
-              <tr
-                key={room.index}
-                className={state.selection === room.index ? 'selected' : ''}
-                onClick={() =>
-                  dispatch({
-                    type: 'SELECT_ROOM',
-                    roomId: state.selection === room.index ? null : room.index,
-                  })
-                }
-              >
-                <td>{room.label}</td>
-                <td>
-                  <span className="chip" style={{ background: palette.get(room.symbol) ?? UNKNOWN_SYMBOL_COLOR }} />
-                  {room.symbol}
-                </td>
-                <td>{room.typeId ?? ru.dash}</td>
-                <td>{room.size}</td>
-                <td>{ru.areaValue(room.size * areasScale, unitLabel)}</td>
-                <td>{room.tableRow?.status ?? ru.dash}</td>
+        <div className="rooms-scroll">
+          <table className="rooms-table">
+            <thead>
+              <tr>
+                <th>{ru.roomsColLabel}</th>
+                <th>{ru.roomsColSymbol}</th>
+                <th>{ru.roomsColType}</th>
+                <th>{ru.roomsColCells}</th>
+                <th>{ru.roomsColArea}</th>
+                <th>{ru.roomsColStatus}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {report.rooms.map((room) => (
+                <tr
+                  key={room.index}
+                  className={state.selection === room.index ? 'selected' : ''}
+                  onClick={() =>
+                    dispatch({
+                      type: 'SELECT_ROOM',
+                      roomId: state.selection === room.index ? null : room.index,
+                    })
+                  }
+                >
+                  <td>{room.label}</td>
+                  <td>
+                    <span className="chip" style={{ background: palette.get(room.symbol) ?? UNKNOWN_SYMBOL_COLOR }} />
+                    {room.symbol}
+                  </td>
+                  <td>{room.typeId ?? ru.dash}</td>
+                  <td>{room.size}</td>
+                  <td>{ru.areaValue(room.size * areasScale, unitLabel)}</td>
+                  <td>{room.tableRow?.status ?? ru.dash}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {report.unmatchedRows.length > 0 && (
         <div className="unmatched-block">
