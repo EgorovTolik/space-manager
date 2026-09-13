@@ -35,6 +35,7 @@ import {
   saveProjectFiles,
 } from '../lib/api';
 import type { GenerateResult, ProjectInfo, ResultInfo } from '../lib/api';
+import LlmPanel from './LlmPanel';
 
 // Дефолты новой спеки (ТЗ 02 §4 п.4 — те же, что в парсинге docs/03).
 const DEFAULT_RULES: Rules = {
@@ -672,6 +673,9 @@ export default function ProjectFilesPanel(): JSX.Element {
           </div>
         )}
       </div>
+
+      {/* ── LLM-генерация (docs-llm/06 §2): отдельный компонент, обычная генерация выше не меняется ── */}
+      {selected !== null && <LlmPanel slug={selected} />}
 
       {/* ── Отчёты генераций: история result-* проекта (замечание 4) ── */}
       {selected !== null && results !== null && (

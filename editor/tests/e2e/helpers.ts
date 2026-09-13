@@ -18,6 +18,40 @@ export interface CapturedApi {
   events: ('put' | 'generate')[];
   /** Тела POST …/generate (порядок вызовов) — напр. {seed} (ST-3). */
   generateBodies: unknown[];
+  /** Тела POST …/llm-generate (порядок вызовов, docs-llm/06 §1.2). */
+  llmGenerateBodies: unknown[];
+  /** Число вызовов POST …/llm-stop. */
+  llmStops: number;
+  /** Число вызовов GET …/llm-sessions (список; полный журнал не считается). */
+  llmSessionsCalls: number;
+}
+
+/** Мок LLM-эндпоинтов (docs-llm/06 §1.1–§1.5). По умолчанию — {configured:false}. */
+export interface MockLlm {
+  /** Тело GET /api/llm/providers (по умолчанию { configured: false, reason: 'моk' }). */
+  providers?: unknown;
+  /** Ответ N-му POST …/llm-generate; по умолчанию 202 {sessionId}. */
+  generate?: (i: number) => { status?: number; body: unknown };
+  /** Ответ N-му вызову GET …/llm-status (N — с нуля, на текущую сессию).
+   * Массив — последовательность, после исчерпания повторяется последний элемент. */
+  status?: unknown[] | ((i: number) => unknown);
+  /** Ответ N-му POST …/llm-stop; по умолчанию 200 {state:'stopping'}. */
+  stop?: (i: number) => { status?: number; body: unknown };
+  /** Список GET …/llm-sessions (newest-first); функция — по номеру вызова. По умолчанию []. */
+  sessions?:
+    | MockLlmSessionSummary[]
+    | ((i: number) => MockLlmSessionSummary[]);
+  /** Полные журналы GET …/llm-sessions/<id> по id. */
+  sessionDetails?: Record<string, unknown>;
+}
+
+export interface MockLlmSessionSummary {
+  sessionId: string;
+  status: 'running' | 'done' | 'stopped' | 'error';
+  modelId: string;
+  promptPreview: string;
+  startedAt: string;
+  finishedAt: string | null;
 }
 
 export interface MockOpts {
@@ -28,6 +62,8 @@ export interface MockOpts {
   /** Начальная история result-* проекта (`GET …/results`); после успешной
    *  генерации новая ревизия добавляется наверх (замечание 4). */
   results?: { name: string; mtimeIso: string }[];
+  /** LLM-эндпоинты (docs-llm/06 §1); без параметра — {configured:false}. */
+  llm?: MockLlm;
 }
 
 export async function mockProject(
@@ -36,7 +72,23 @@ export async function mockProject(
   files: MockFiles,
   opts: MockOpts = {},
 ): Promise<CapturedApi> {
-  const captured: CapturedApi = { puts: [], events: [], generateBodies: [] };
+  const captured: CapturedApi = {
+    puts: [],
+    events: [],
+    generateBodies: [],
+    llmGenerateBodies: [],
+    llmStops: 0,
+    llmSessionsCalls: 0,
+  };
+  const llm = opts.llm ?? {};
+  const statusArg = llm.status;
+  const llmStatusFn: (i: number) => unknown = Array.isArray(statusArg)
+    ? (i) => statusArg[Math.min(i, statusArg.length - 1)]
+    : typeof statusArg === 'function'
+      ? statusArg
+      : () => ({ state: 'running', log: [], error: null, startedAt: '', finishedAt: null });
+  let llmStatusCalls = 0;
+  let llmStopCalls = 0;
   // Историю result-* храним в замыкании: успешная генерация добавляет ревизию наверх.
   let resultsList: { name: string; mtimeIso: string }[] = [...(opts.results ?? [])];
   const info = (n: string) => ({
@@ -90,6 +142,71 @@ export async function mockProject(
       body: JSON.stringify({ results: resultsList }),
     }),
   );
+
+  // ── LLM-эндпоинты (docs-llm/06 §1.1–§1.5) ─────────────────────────────────────
+  await page.route('**/api/llm/providers', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(llm.providers ?? { configured: false, reason: 'мок' }),
+    }),
+  );
+
+  await page.route(/\/api\/projects\/[^/]+\/llm-generate/, (route) => {
+    captured.llmGenerateBodies.push(route.request().postDataJSON() ?? {});
+    const resp = llm.generate ? llm.generate(captured.llmGenerateBodies.length - 1) : { status: 202, body: { sessionId: '20260913-120000' } };
+    return route.fulfill({
+      status: resp.status ?? 202,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(resp.body),
+    });
+  });
+
+  await page.route(/\/api\/projects\/[^/]+\/llm-status/, (route) => {
+    const i = llmStatusCalls++;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(llmStatusFn(i)),
+    });
+  });
+
+  await page.route(/\/api\/projects\/[^/]+\/llm-stop/, (route) => {
+    const resp = llm.stop ? llm.stop(llmStopCalls++) : { status: 200, body: { state: 'stopping' } };
+    captured.llmStops += 1;
+    return route.fulfill({
+      status: resp.status ?? 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(resp.body),
+    });
+  });
+
+  await page.route(/\/api\/projects\/[^/]+\/llm-sessions\/[^/]+$/, (route) => {
+    const id = route.request().url().split('/').pop() ?? '';
+    const details = llm.sessionDetails ?? {};
+    if (Object.prototype.hasOwnProperty.call(details, id)) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify(details[id]),
+      });
+    }
+    return route.fulfill({
+      status: 404,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ error: 'LLM_NO_SESSION', message: `Сессия «${id}» не найдена` }),
+    });
+  });
+
+  await page.route(/\/api\/projects\/[^/]+\/llm-sessions$/, (route) => {
+    const list = typeof llm.sessions === 'function' ? llm.sessions(captured.llmSessionsCalls) : (llm.sessions ?? []);
+    captured.llmSessionsCalls += 1;
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ sessions: list }),
+    });
+  });
 
   await page.route(/\/api\/projects\/[^/]+\/generate/, (route) => {
     const i = captured.events.filter((e) => e === 'generate').length;

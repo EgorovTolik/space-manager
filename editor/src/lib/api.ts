@@ -132,3 +132,131 @@ export async function generatePlacement(
   if (!res.ok) throw await toApiError(res);
   return (await res.json()) as GenerateResult;
 }
+
+// ── LLM-агентные прогоны (docs-llm/06 §1) ─────────────────────────────────────
+
+/** Модель провайдера (`GET /api/llm/providers`, 06 §1.1); ключи в ответе не передаются. */
+export interface LlmModelInfo {
+  id: string;
+  label: string | null;
+}
+
+export interface LlmProviderInfo {
+  id: string;
+  models: LlmModelInfo[];
+}
+
+/** Провайдеры + модели; без/с невалидным llm.config.json → `configured:false` (200). */
+export interface LlmProvidersResponse {
+  configured: boolean;
+  reason?: string;
+  defaultModel?: string;
+  providers?: LlmProviderInfo[];
+}
+
+export async function getLlmProviders(): Promise<LlmProvidersResponse> {
+  const res = await fetch('/api/llm/providers');
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as LlmProvidersResponse;
+}
+
+/** Лимиты прогона (05 §2); пустые поля UI → поле не передаётся (дефолт сервера). */
+export interface LlmLimits {
+  maxIterations?: number;
+  timeBudgetPerRun?: number;
+  totalTimeoutSec?: number;
+}
+
+/** Старт прогона: `POST …/llm-generate` → **202** `{sessionId}`.
+ * Ошибки: 400 LLM_INVALID_BODY, 503 LLM_NOT_CONFIGURED, 422 LLM_UNKNOWN_MODEL,
+ * 409 LLM_SESSION_ACTIVE (ApiError.code — код из JSON-ошибки). */
+export async function startLlmGenerate(
+  slug: string,
+  body: { prompt: string; modelId: string; limits?: LlmLimits },
+): Promise<{ sessionId: string }> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(slug)}/llm-generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (res.status !== 202) throw await toApiError(res);
+  return (await res.json()) as { sessionId: string };
+}
+
+/** Шаг журнала в live-виде статуса (06 §1.3). */
+export interface LlmLogEntry {
+  n: number;
+  action: string | null; // null — неверный ответ протокола
+  ok: boolean;
+  summary: string;
+}
+
+/** Состояние прогона (`GET …/llm-status?session=…`, 06 §1.3); опрос ~1.5 c, без SSE. */
+export interface LlmStatusView {
+  state: 'running' | 'done' | 'stopped' | 'error';
+  log: LlmLogEntry[];
+  candidates?: { file: string; comment: string }[];
+  recommended?: string;
+  error: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export async function getLlmStatus(slug: string, sessionId: string): Promise<LlmStatusView> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(slug)}/llm-status?session=${encodeURIComponent(sessionId)}`,
+  );
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as LlmStatusView;
+}
+
+/** Остановка: `POST …/llm-stop` → `{state}` ('stopping' или текущее терминальное).
+ * Неизвестная/нет сессии → 404 LLM_NO_SESSION. */
+export async function stopLlm(slug: string): Promise<{ state: string }> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(slug)}/llm-stop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as { state: string };
+}
+
+/** Краткая запись списка сессий (`GET …/llm-sessions`, newest-first, 06 §1.5). */
+export interface LlmSessionSummary {
+  sessionId: string;
+  status: 'running' | 'done' | 'stopped' | 'error';
+  modelId: string;
+  promptPreview: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export async function listLlmSessions(slug: string): Promise<LlmSessionSummary[]> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(slug)}/llm-sessions`);
+  if (!res.ok) throw await toApiError(res);
+  const body = (await res.json()) as { sessions: LlmSessionSummary[] };
+  return body.sessions;
+}
+
+/** Полный журнал сессии (`GET …/llm-sessions/<id>`, формат 05 §5). */
+export interface LlmJournalRecord {
+  prompt: string;
+  modelId: string;
+  limits: LlmLimits;
+  iterations: Array<LlmLogEntry & { args: Record<string, unknown> }>;
+  candidates?: { file: string; comment: string }[];
+  recommended?: string;
+  status: 'running' | 'done' | 'stopped' | 'error';
+  startedAt: string;
+  finishedAt: string | null;
+  error?: string;
+}
+
+export async function loadLlmSession(slug: string, sessionId: string): Promise<LlmJournalRecord> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(slug)}/llm-sessions/${encodeURIComponent(sessionId)}`,
+  );
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as LlmJournalRecord;
+}
