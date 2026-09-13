@@ -119,6 +119,18 @@ export default function ProjectFilesPanel(): JSX.Element {
   const [hText, setHText] = useState('');
   const [sizeError, setSizeError] = useState<string | null>(null);
 
+  // Синхронизация полей W×H с загруженной спекой (баг-фикс: в проектном режиме поля
+  // оставались пустыми — '' при инициализации не обновлялись при загрузке проекта).
+  // Ключи — выбранный проект и размеры сетки: обычные правки кластеров/масок
+  // (новый объект state.spec при тех же grid) введённый, ещё неприменённый текст не сбрасывают.
+  useEffect(() => {
+    if (spec !== null) {
+      setWText(String(spec.grid.width));
+      setHText(String(spec.grid.height));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, spec?.grid.width, spec?.grid.height]);
+
   // Диалог создания спеки (ТЗ 02 §7) и одноразовое предупреждение о неизвестных полях.
   const [showCreate, setShowCreate] = useState(false);
   const [createW, setCreateW] = useState('');

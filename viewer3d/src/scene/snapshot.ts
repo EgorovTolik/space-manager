@@ -53,8 +53,20 @@ export function onSnapshotResult(listener: (result: SnapshotResult) => void): ()
 /**
  * Снять кадр. null — сцена ещё не построена или нет отрисованного кадра
  * (результаты слушателям в этом случае НЕ рассылаются).
+ *
+ * waitForHandlerMs: <Canvas> (R3F) монтируется асинхронно — обработчик регистрируется
+ * в эффекте ПОСЛЕ первого кадра. Клик по [PNG] в первые мгновения загрузки сцены
+ * раньше терялся молча (current === null). Теперь takeSnapshot ограниченное время
+ * ждёт регистрации (по умолчанию 500 мс, поллинг ~32 мс) и лишь затем возвращает null.
  */
-export async function takeSnapshot(): Promise<SnapshotResult | null> {
+export async function takeSnapshot(opts?: { waitForHandlerMs?: number }): Promise<SnapshotResult | null> {
+  const waitMs = opts?.waitForHandlerMs ?? 500;
+  if (current === null && waitMs > 0) {
+    const deadline = Date.now() + waitMs;
+    while (current === null && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 32));
+    }
+  }
   if (current === null) return null;
   const result = await current();
   if (result !== null) {

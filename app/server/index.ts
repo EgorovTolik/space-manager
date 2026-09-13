@@ -187,6 +187,18 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
   const json = express.json({ limit: '10mb' });
   const raw = express.raw({ limit: '10mb', type: '*/*' });
 
+  // Ленивое восстановление workspace: каталог мог быть удалён извне после createApp
+  // (например, e2e-очистка между стартом сервера и первыми запросами) — без этого все
+  // проектные эндпоинты падали бы ENOENT до рестарта. lstat раз на запрос — дёшево.
+  app.use('/api', async (_req, res, next) => {
+    try {
+      await ensureWorkspace(cfg.workspaceDir);
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // 6.2 список проектов (+ filesCount — решение ТЗ 05 §8)
   app.get(
     '/api/projects',

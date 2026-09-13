@@ -16,6 +16,7 @@ import { buildRoomFloorGeometry } from './roomFloor';
 import { getSnapshotTarget, setSnapshotHandler } from './snapshot';
 import { savePreview } from '../lib/api';
 import { snapshotFileName } from '../lib/timestamp';
+import { ru } from '../i18n/ru';
 
 // Константы сцены (ТЗ 03 §1/§9)
 const SCENE_BACKGROUND = '#f2f4f7';
@@ -413,10 +414,18 @@ function SnapshotBinder() {
   const gl = useThree((s) => s.gl);
   useEffect(() => {
     setSnapshotHandler(async () => {
-      const blob = await new Promise<Blob | null>((resolve) =>
-        gl.domElement.toBlob(resolve, 'image/png'),
-      );
-      if (blob === null) return null; // нет отрисованного кадра — результат не формируется
+      const capture = (): Promise<Blob | null> =>
+        new Promise<Blob | null>((resolve) => gl.domElement.toBlob(resolve, 'image/png'));
+      // Гонка после перестроения сцены (смена ревизии): кадр может ещё не быть
+      // готовым — toBlob вернёт null. Одна повторная попытка после следующего кадра;
+      // если так и не удалось — видимый баннер ошибки, а не молчание (ТЗ 04 §2.4:
+      // результат всегда отражается в статусе/баннере панели).
+      let blob = await capture();
+      if (blob === null) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        blob = await capture();
+      }
+      if (blob === null) return { error: ru.snapshotFailed };
       const t = getSnapshotTarget();
       if (t !== null) {
         try {

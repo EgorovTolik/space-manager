@@ -30,6 +30,7 @@ export const ru = {
 
   // PNG → предпросмотр проекта (docs-unified/04 §2.4)
   snapshotSaved: (file: string): string => `Предпросмотр сохранён в проект: ${file}`,
+  snapshotFailed: 'Не удалось снять кадр сцены — попробуйте ещё раз',
   snapshotErrorBanner: (msg: string): string => `Не удалось сохранить предпросмотр: ${msg}`,
 
   // Заголовок (docs-unified/04 §2.2)

@@ -22,9 +22,18 @@ describe('snapshot registry (docs-unified/04 §2.2/§2.4)', () => {
   it('takeSnapshot без обработчика → null, слушатели не вызываются', async () => {
     const seen: SnapshotResult[] = [];
     const off = onSnapshotResult((r) => seen.push(r));
-    expect(await takeSnapshot()).toBeNull();
+    // waitForHandlerMs: 0 — не ждём асинхронную регистрацию (см. тест ниже).
+    expect(await takeSnapshot({ waitForHandlerMs: 0 })).toBeNull();
     expect(seen).toEqual([]);
     off();
+  });
+
+  it('takeSnapshot ждёт асинхронную регистрацию обработчика (гонка с монтажом Canvas)', async () => {
+    // Обработчик регистрируется ПОСЛЕ начала вызова — имитация асинхронного
+    // монтирования <Canvas>: клик по [PNG] в первые мгновения не должен теряться.
+    setTimeout(() => setSnapshotHandler(async () => ({ downloaded: 'late.png' })), 40);
+    const got = await takeSnapshot({ waitForHandlerMs: 300 });
+    expect(got).toEqual({ downloaded: 'late.png' });
   });
 
   it('takeSnapshot → результат обработчика; слушатель получает тот же объект', async () => {
