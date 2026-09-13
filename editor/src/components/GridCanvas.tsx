@@ -11,7 +11,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { ru } from '../i18n/ru';
 import { useEditor } from '../state/editorStore';
-import type { CellValue } from '../lib/types';
+import type { BlockedCellValue, CellValue, PresetCellValue } from '../lib/types';
+import { cellValueKey, floodFill } from '../lib/fill';
+import { bresenham } from '../lib/bresenham';
 import { validateAll } from '../lib/validation';
 import { cellPx, clampZoom, fitCellPx, hitTest, visibleRange, zoomAtCursor } from '../lib/gridView';
 import { buildTypePalette, textColorFor } from '../lib/typeColors';
@@ -59,7 +61,17 @@ interface RectGesture {
   y1: number;
 }
 
-type Gesture = StrokeGesture | PanGesture | RectGesture;
+// Линия (ST-2): drag как у прямоугольника; по pointerup — Брезенхэм от старта к концу.
+interface LineGesture {
+  kind: 'line';
+  mask: MaskKind;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+type Gesture = StrokeGesture | PanGesture | RectGesture | LineGesture;
 
 export default function GridCanvas(): JSX.Element {
   const { state, dispatch } = useEditor();
@@ -86,6 +98,8 @@ export default function GridCanvas(): JSX.Element {
   const hintTimerRef = useRef<number | null>(null);
   // Прямоугольник-рамка для предпросмотра (рисуется на canvas, не в React)
   const rectSelRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  // Линия для предпросмотра drag (ST-2) — аналогично rectSelRef
+  const lineSelRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
 
   const setHint = useCallback((msg: string) => {
     setHintState(msg);
@@ -229,6 +243,16 @@ export default function GridCanvas(): JSX.Element {
       ctx.strokeRect(panX + x0 * size, panY + y0 * size, (x1 - x0 + 1) * size, (y1 - y0 + 1) * size);
     }
 
+    // Предпросмотр линии (drag, ST-2): полупрозрачные клетки вдоль Брезенхэма
+    // в стиле C_RECT_SEL; предпросмотр не зависит от размера (линия ≤ grid).
+    const line = lineSelRef.current;
+    if (line) {
+      ctx.fillStyle = 'rgba(245, 166, 35, 0.45)'; // C_RECT_SEL с прозрачностью
+      for (const [lx, ly] of bresenham(line.x0, line.y0, line.x1, line.y1)) {
+        ctx.fillRect(panX + lx * size, panY + ly * size, size, size);
+      }
+    }
+
     drawMinimap(palette);
   }, []);
 
@@ -294,6 +318,16 @@ export default function GridCanvas(): JSX.Element {
 
   const drawRef = useRef(draw);
   drawRef.current = draw;
+
+  // Размер canvas (атрибуты width/height) синхронизируем с viewport'ом СИНХРОННО
+  // при каждом изменении view: иначе элемент «догоняет» размер в rAF внутри draw(),
+  // и между кадрами DOM-геометрия ≠ fit (hover/click по boundingBox попадают не в ту клетку).
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || view.w <= 0 || view.h <= 0) return;
+    if (canvas.width !== view.w) canvas.width = view.w;
+    if (canvas.height !== view.h) canvas.height = view.h;
+  }, [view]);
 
   // Не более одного redraw на кадр (ТЗ 04 §3.7)
   const drawScheduled = useRef(false);
@@ -400,6 +434,60 @@ export default function GridCanvas(): JSX.Element {
     return null;
   }
 
+  // ── Заливка (ST-2): одиночный клик → flood-fill связной области за ОДИН
+  //    STROKE_APPLY (готовый список клеток, без rAF-потока). Клетки другой маски —
+  //    граница области. Область любого размера (включая > 20000 клеток) заливается
+  //    одним батчем: перерисовка один раз, предпросмотра нет.
+  function applyFill(kind: MaskKind, cx: number, cy: number): void {
+    const st = stateRef.current;
+    if (!st.spec) return;
+    const hint = crossMaskHint(kind, cx, cy);
+    if (hint) {
+      setHint(hint);
+      return;
+    }
+
+    if (kind === 'blocked') {
+      const bm = st.blockedMask;
+      const pm = st.presetMask;
+      if (!bm) return;
+      // Клетки, занятые preset-маской, — граница области (защита §3.6).
+      const eff: ('blocked' | 'free' | null)[][] = bm.cells.map((row, y) =>
+        row.map((v, x) =>
+          pm && x < pm.width && y < pm.height && pm.cells[y][x].kind === 'preset' ? null : v,
+        ),
+      );
+      const start = eff[cy]?.[cx];
+      if (start == null) return; // недостижимо: crossMaskHint выше
+      // Toggle-семантика кисти, расширенная на всю 8-связную область.
+      const value: BlockedCellValue = start === 'blocked' ? 'free' : 'blocked';
+      const cells = floodFill(eff, cx, cy, (a, b) => a === b);
+      dispatch({ type: 'STROKE_APPLY', kind: 'blocked', cells, value });
+      return;
+    }
+
+    // preset-маска: symbol из палитры обязателен (как у кисти)
+    const symbol = st.ui.paletteSymbol;
+    if (!symbol) {
+      setHint(ru.grid.paletteHint);
+      return;
+    }
+    const pm = st.presetMask;
+    const bm = st.blockedMask;
+    if (!pm) return;
+    // Клетки blocked-маски — граница области.
+    const eff: (PresetCellValue | null)[][] = pm.cells.map((row, y) =>
+      row.map((v, x) =>
+        bm && x < bm.width && y < bm.height && bm.cells[y][x] === 'blocked' ? null : v,
+      ),
+    );
+    const start = eff[cy]?.[cx];
+    // Клик по области, уже равной целевому символу — noop (как в Paint).
+    if (!start || (start.kind === 'preset' && start.symbol === symbol)) return;
+    const cells = floodFill(eff, cx, cy, (a, b) => cellValueKey(a) === cellValueKey(b));
+    dispatch({ type: 'STROKE_APPLY', kind: 'preset', cells, value: { kind: 'preset', symbol } });
+  }
+
   // ── Stroke: батчи через rAF, не чаще раза в кадр (ТЗ 04 §3.7) ─────────────
 
   const flushStroke = useCallback(() => {
@@ -487,6 +575,22 @@ export default function GridCanvas(): JSX.Element {
       return;
     }
 
+    // Линия (ST-2): как прямоугольник — начало фиксируется, предпросмотр по drag,
+    // применение по pointerup в endGesture.
+    if (tool === 'line') {
+      gestureRef.current = { kind: 'line', mask: kind, x0: cell.x, y0: cell.y, x1: cell.x, y1: cell.y };
+      lineSelRef.current = { x0: cell.x, y0: cell.y, x1: cell.x, y1: cell.y };
+      requestDraw();
+      capturePointer(e.pointerId);
+      return;
+    }
+
+    // Заливка (ST-2): одиночный клик — flood-fill области одним батчем.
+    if (tool === 'fill') {
+      applyFill(kind, cell.x, cell.y);
+      return;
+    }
+
     const hint = crossMaskHint(kind, cell.x, cell.y);
     if (hint) {
       setHint(hint);
@@ -560,6 +664,15 @@ export default function GridCanvas(): JSX.Element {
       }
       return;
     }
+    if (g.kind === 'line') {
+      if (cell) {
+        g.x1 = cell.x;
+        g.y1 = cell.y;
+        lineSelRef.current = { x0: g.x0, y0: g.y0, x1: g.x1, y1: g.y1 };
+        requestDraw();
+      }
+      return;
+    }
     // stroke: каждая новая клетка за stroke — один раз (мультименжество, ТЗ 04 §3.7)
     if (!cell) return;
     const key = `${cell.x},${cell.y}`;
@@ -596,6 +709,27 @@ export default function GridCanvas(): JSX.Element {
       }
       rectSelRef.current = null;
       requestDraw();
+    } else if (g.kind === 'line') {
+      // Линия (ST-2): Брезенхэм от старта к концу включительно, семантика значения —
+      // как у RECT_FILL (blocked → 'blocked'; preset → symbol из палитры). Применяется
+      // одним STROKE_APPLY; занятые другой маской клетки не пропускаются — ровно как
+      // в RECT_FILL (store применяет список клеток целиком).
+      const st = stateRef.current;
+      if (st.spec && isEditable(g.mask)) {
+        let value: CellValue | null = null;
+        if (g.mask === 'blocked') {
+          value = 'blocked';
+        } else if (st.ui.paletteSymbol) {
+          value = { kind: 'preset', symbol: st.ui.paletteSymbol };
+        }
+        if (value) {
+          dispatch({ type: 'STROKE_APPLY', kind: g.mask, cells: bresenham(g.x0, g.y0, g.x1, g.y1), value });
+        } else {
+          setHint(ru.grid.paletteHint);
+        }
+      }
+      lineSelRef.current = null;
+      requestDraw();
     }
   }
 
@@ -606,6 +740,7 @@ export default function GridCanvas(): JSX.Element {
   function onPointerCancel(e: ReactPointerEvent<HTMLCanvasElement>): void {
     gestureRef.current = null; // незавершённый stroke не применяется
     rectSelRef.current = null;
+    lineSelRef.current = null;
     releasePointer(canvasRef.current, e.pointerId);
     requestDraw();
   }
@@ -664,6 +799,12 @@ export default function GridCanvas(): JSX.Element {
           break;
         case '3':
           dispatch({ type: 'UI_SET_TOOL', tool: 'eraser' });
+          break;
+        case '4':
+          dispatch({ type: 'UI_SET_TOOL', tool: 'fill' });
+          break;
+        case '5':
+          dispatch({ type: 'UI_SET_TOOL', tool: 'line' });
           break;
         case 'b':
         case 'B':
@@ -812,6 +953,8 @@ export default function GridCanvas(): JSX.Element {
             ['brush', ru.grid.toolBrush],
             ['rect', ru.grid.toolRect],
             ['eraser', ru.grid.toolEraser],
+            ['fill', ru.grid.toolFill],
+            ['line', ru.grid.toolLine],
           ] as const
         ).map(([tool, label]) => (
           <button

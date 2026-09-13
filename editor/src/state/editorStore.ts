@@ -31,7 +31,7 @@ import type {
 
 export interface EditorUIState {
   maskMode: 'blocked' | 'preset'; // активный режим canvas (04 §3)
-  tool: 'brush' | 'rect' | 'eraser'; // инструмент
+  tool: 'brush' | 'rect' | 'eraser' | 'fill' | 'line'; // инструмент (fill/line — ST-2)
   paletteSymbol: string | null; // выбранный символ типа в preset-режиме
   pan: { x: number; y: number }; // смещение viewport в пикселях canvas
   zoom: number; // масштаб, 1 = автоподгонка сетки под область

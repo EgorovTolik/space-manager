@@ -23,6 +23,8 @@ export const ru = {
     toolBrush: 'Кисть (1)',
     toolRect: 'Прямоугольник (2)',
     toolEraser: 'Ластик (3)',
+    toolFill: 'Заливка (4)',
+    toolLine: 'Линия (5)',
     maskNotLoaded: 'Маска не загружена (см. панель Файлы)',
     noSpec: 'Сначала загрузите спекацию',
     noMasks: 'Маски не загружены (см. панель Файлы)',
