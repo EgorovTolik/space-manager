@@ -6,7 +6,11 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { ApiError } from '../../server/errors.js';
 import {
+  applyCatalogRemove,
+  applyCatalogUpdate,
+  MAX_TYPE_NAME_LEN,
   mergeCatalog,
   parseTypesLenient,
   seedCatalogFromProjects,
@@ -133,6 +137,97 @@ describe('seedCatalogFromProjects — seed по workspace (ST-1)', () => {
     const catalog = await seedCatalogFromProjects(tmp, fixedNow);
     expect(catalog.types).toEqual({});
     await expect(fsp.access(path.join(tmp, 'types-catalog.json'))).resolves.toBeUndefined();
+  });
+});
+
+/** Захват исключения: ожидаем ApiError со статусом; возвращаем message. */
+function expectApiError(fn: () => unknown, status: number): string {
+  try {
+    fn();
+  } catch (err) {
+    expect(err).toBeInstanceOf(ApiError);
+    const e = err as ApiError;
+    expect(e.status).toBe(status);
+    return e.message;
+  }
+  throw new Error(`ожидалось ApiError(${status}), исключение не брошено`);
+}
+
+describe('applyCatalogUpdate — чистое обновление записи (ST-3)', () => {
+  const base = (): TypesCatalog =>
+    catalog({ A: { symbol: 'A', name: 'тип А' }, B: { symbol: 'B', name: null } });
+
+  it('смена symbol и name → запись обновлена, updatedAt свежий, исходник не мутируется', () => {
+    const { catalog: next, changed } = applyCatalogUpdate(base(), 'A', { symbol: 'Q', name: 'новый' }, nowIso);
+    expect(changed).toBe(true);
+    expect(next.types.A).toEqual({ symbol: 'Q', name: 'новый' });
+    expect(next.types.B).toEqual({ symbol: 'B', name: null }); // остальные записи не тронуты
+    expect(next.updatedAt).toBe(nowIso);
+  });
+
+  it('повтор с теми же значениями → changed=false, updatedAt НЕ меняется', () => {
+    const { catalog: next, changed } = applyCatalogUpdate(base(), 'A', { symbol: 'A', name: 'тип А' }, nowIso);
+    expect(changed).toBe(false);
+    expect(next.updatedAt).toBe('old');
+  });
+
+  it('name: null → имя сброшено; отсутствие name в патче → имя сохраняется', () => {
+    const cleared = applyCatalogUpdate(base(), 'A', { name: null }, nowIso);
+    expect(cleared.changed).toBe(true);
+    expect(cleared.catalog.types.A).toEqual({ symbol: 'A', name: null });
+
+    const kept = applyCatalogUpdate(base(), 'B', { symbol: 'K' }, nowIso);
+    expect(kept.catalog.types.B).toEqual({ symbol: 'K', name: null }); // null остался как был
+  });
+
+  it('symbol уже занят ДРУГИМ id → 422 с id владельца в сообщении; собственный symbol — не конфликт', () => {
+    const msg = expectApiError(() => applyCatalogUpdate(base(), 'A', { symbol: 'B' }, nowIso), 422);
+    expect(msg).toContain('типом «B»'); // B — id-владелец символа «B»
+    // Свой собственный символ не считается дубликатом.
+    const ok = applyCatalogUpdate(base(), 'A', { symbol: 'A', name: 'x' }, nowIso);
+    expect(ok.changed).toBe(true);
+  });
+
+  it('битый symbol: «.», «*», два символа, пусто → 400; имя > 64 → 400; ровно 64 → ок', () => {
+    for (const bad of ['.', '*', 'AB', '']) {
+      const msg = expectApiError(() => applyCatalogUpdate(base(), 'A', { symbol: bad }, nowIso), 400);
+      expect(msg).toBeTruthy();
+    }
+    expectApiError(
+      () => applyCatalogUpdate(base(), 'A', { name: 'x'.repeat(MAX_TYPE_NAME_LEN + 1) }, nowIso),
+      400,
+    );
+    const ok = applyCatalogUpdate(base(), 'A', { name: 'x'.repeat(MAX_TYPE_NAME_LEN) }, nowIso);
+    expect(ok.changed).toBe(true);
+  });
+
+  it('пустой патч {} → 400; не-строковый symbol/name → 400; несуществующий id → 404', () => {
+    expect(expectApiError(() => applyCatalogUpdate(base(), 'A', {}, nowIso), 400)).toContain('минимум одно поле');
+    expectApiError(() => applyCatalogUpdate(base(), 'A', { symbol: 5 }, nowIso), 400);
+    expectApiError(() => applyCatalogUpdate(base(), 'A', { name: ['нет'] }, nowIso), 400);
+    const msg404 = expectApiError(() => applyCatalogUpdate(base(), 'NOPE', { symbol: 'K' }, nowIso), 404);
+    expect(msg404).toContain('NOPE');
+  });
+});
+
+describe('applyCatalogRemove — чистое удаление записи (ST-3)', () => {
+  it('существующий id → запись удалена, updatedAt свежий; остальные записи на месте', () => {
+    const { catalog: next, changed } = applyCatalogRemove(
+      catalog({ A: { symbol: 'A', name: null }, B: { symbol: 'B', name: 'б' } }),
+      'A',
+      nowIso,
+    );
+    expect(changed).toBe(true);
+    expect(next.types).toEqual({ B: { symbol: 'B', name: 'б' } });
+    expect(next.updatedAt).toBe(nowIso);
+  });
+
+  it('несуществующий id → 404 с id в сообщении', () => {
+    const msg = expectApiError(
+      () => applyCatalogRemove(catalog({ A: { symbol: 'A', name: null } }), 'NOPE', nowIso),
+      404,
+    );
+    expect(msg).toContain('NOPE');
   });
 });
 

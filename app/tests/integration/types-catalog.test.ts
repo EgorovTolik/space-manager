@@ -93,6 +93,72 @@ describe('Общий каталог типов (ST-1)', () => {
     expect(catalog.types.A).toEqual({ symbol: 'A', name: 'Тип А' });
   });
 
+  it('PATCH /api/types-catalog/:id — успешный PATCH меняет файл и GET; занятое symbol → 422 с владельцем', async () => {
+    await fakeProject('p1', SPEC_A);
+    await fakeProject('p2', SPEC_AB);
+    const r0 = await api(ctx, 'GET', '/api/types-catalog'); // seed {A,B}
+    expect(r0.status).toBe(200);
+
+    // Несуществующий id → 404.
+    const miss = await api(ctx, 'PATCH', '/api/types-catalog/NOPE', { symbol: 'K' });
+    expect(miss.status).toBe(404);
+    expect((miss.json as { error: string }).error).toBe('TYPE_NOT_FOUND');
+
+    // Пустое тело → 400.
+    const empty = await api(ctx, 'PATCH', '/api/types-catalog/A', {});
+    expect(empty.status).toBe(400);
+
+    // Занятое symbol: B берёт символ «A» (занят id A) → 422 с id владельца в сообщении.
+    const dup = await api(ctx, 'PATCH', '/api/types-catalog/B', { symbol: 'A' });
+    expect(dup.status).toBe(422);
+    const dupMsg = (dup.json as { message: string }).message;
+    expect(dupMsg).toContain('Символ «A»');
+    expect(dupMsg).toContain('типом «A»'); // владелец — id A
+
+    // Успешный PATCH: меняем symbol и имя у B; файл каталога обновлён, GET — новое значение.
+    const catalogFile = path.join(ctx.ws, 'types-catalog.json');
+    const before = await fsp.readFile(catalogFile, 'utf8');
+    const ok = await api(ctx, 'PATCH', '/api/types-catalog/B', { symbol: '9', name: null });
+    expect(ok.status).toBe(200);
+    expect(ok.json).toEqual({
+      types: {
+        A: { symbol: 'A', name: 'Тип А' },
+        B: { symbol: '9', name: null },
+      },
+    });
+    const after = await fsp.readFile(catalogFile, 'utf8');
+    expect(after).not.toBe(before); // файл на диске изменён
+    const onDisk = JSON.parse(after) as { types: Record<string, { symbol: string; name: string | null }>; updatedAt: string };
+    expect(onDisk.types.B).toEqual({ symbol: '9', name: null });
+    expect(onDisk.updatedAt).not.toBe((JSON.parse(before) as { updatedAt: string }).updatedAt);
+
+    const get = await api(ctx, 'GET', '/api/types-catalog');
+    expect((get.json as { types: Record<string, unknown> }).types.B).toEqual({ symbol: '9', name: null });
+  });
+
+  it('DELETE /api/types-catalog/:id → исчез из каталога (200 с полным каталогом); повторно → 404; spec.yaml проектов НЕ изменился', async () => {
+    await fakeProject('p1', SPEC_A);
+    const r0 = await api(ctx, 'GET', '/api/types-catalog'); // seed {A}
+    expect(r0.status).toBe(200);
+    const specBefore = await fsp.readFile(path.join(ctx.ws, 'p1/spec.yaml'), 'utf8');
+
+    // DELETE: 200 с полным каталогом (формат как у GET), A исчез.
+    const del = await api(ctx, 'DELETE', '/api/types-catalog/A');
+    expect(del.status).toBe(200);
+    expect(del.json).toEqual({ types: {} });
+    const get1 = await api(ctx, 'GET', '/api/types-catalog');
+    expect(get1.json).toEqual({ types: {} });
+
+    // Повторный DELETE → 404.
+    const del2 = await api(ctx, 'DELETE', '/api/types-catalog/A');
+    expect(del2.status).toBe(404);
+    expect((del2.json as { error: string }).error).toBe('TYPE_NOT_FOUND');
+
+    // Проект с типом A при этом НЕ изменился: spec.yaml побайтово тот же.
+    const specAfter = await fsp.readFile(path.join(ctx.ws, 'p1/spec.yaml'), 'utf8');
+    expect(specAfter).toBe(specBefore);
+  });
+
   it('импорт zip со spec.yaml → типы импорта регистрируются в каталоге (best-effort)', async () => {
     await fakeProject('p1', SPEC_A);
     const r0 = await api(ctx, 'GET', '/api/types-catalog'); // seed {A}

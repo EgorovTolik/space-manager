@@ -22,7 +22,12 @@ import {
   DEFAULT_LLM_LIMITS,
   type LlmLimits,
 } from './llm/actions.js';
-import { ensureTypesCatalog, registerSpecIntoCatalog } from './typesCatalog.js';
+import {
+  ensureTypesCatalog,
+  patchCatalogType,
+  registerSpecIntoCatalog,
+  removeCatalogType,
+} from './typesCatalog.js';
 import {
   listJournals,
   nextSessionId,
@@ -236,6 +241,34 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
     '/api/types-catalog',
     asyncH(async (_req, res) => {
       const catalog = await ensureTypesCatalog(cfg.workspaceDir, cfg.now);
+      res.json({ types: catalog.types });
+    }),
+  );
+
+  // ST-3: редактирование типа. Тело { symbol?, name? } (минимум одно поле; имя ≤ 64,
+  // null — без имени). Изменяется ТОЛЬКО глобальный каталог: spec.yaml проектов не
+  // трогаются, и при следующем seed/merge удалённый тип может возродиться. Ответ как у
+  // GET — 200 { types } (полный каталог).
+  app.patch(
+    '/api/types-catalog/:id',
+    json,
+    asyncH(async (req, res) => {
+      const body = req.body;
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        throw ApiError.invalidName('Тело запроса должно быть объектом { "symbol"?, "name"? }');
+      }
+      const catalog = await patchCatalogType(cfg.workspaceDir, req.params.id, body as { symbol?: unknown; name?: unknown }, cfg.now);
+      res.json({ types: catalog.types });
+    }),
+  );
+
+  // ST-3: удаление типа из каталога. Формат ответа — тот же, что у GET/PATCH:
+  // 200 { types } (НЕ 204 как у DELETE /api/projects/:p) — клиент сразу получает
+  // актуальный каталог без доп. запроса. СМ. семантику PATCH выше (проекты не трогаются).
+  app.delete(
+    '/api/types-catalog/:id',
+    asyncH(async (req, res) => {
+      const catalog = await removeCatalogType(cfg.workspaceDir, req.params.id, cfg.now);
       res.json({ types: catalog.types });
     }),
   );

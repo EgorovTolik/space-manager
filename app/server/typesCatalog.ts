@@ -8,6 +8,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import yaml from 'js-yaml';
 
+import { ApiError } from './errors.js';
 import type { Clock } from './workspace.js';
 
 /** Имя файла каталога в корне workspace. */
@@ -85,6 +86,90 @@ export function mergeCatalog(
   };
 }
 
+/** Максимальная длина имени типа (ST-3). */
+export const MAX_TYPE_NAME_LEN = 64;
+
+/**
+ * Чистое обновление записи каталога (ST-3): PATCH { symbol?, name? }, минимум
+ * одно поле. Правила symbol совпадают с editor/src/lib/fileUtils.ts#symbolError:
+ * ОДИН символ, не «.» и не «*»; name ≤ MAX_TYPE_NAME_LEN (null — без имени,
+ * отсутствие поля — имя сохраняется). Уникальность symbol: занят ДРУГИМ id →
+ * 422 с id владельца; id не существует → 404. Политика updatedAt как у
+ * mergeCatalog: свежий ТОЛЬКО при фактическом изменении значения (повтор с теми же значениями
+ * — changed=false, файл не трогаем).
+ */
+export function applyCatalogUpdate(
+  catalog: TypesCatalog,
+  id: string,
+  patch: { symbol?: unknown; name?: unknown },
+  nowIso: string,
+): { catalog: TypesCatalog; changed: boolean } {
+  const hasSymbol = Object.prototype.hasOwnProperty.call(patch, 'symbol');
+  const hasName = Object.prototype.hasOwnProperty.call(patch, 'name');
+  if (!hasSymbol && !hasName) {
+    throw ApiError.invalidName('Укажите минимум одно поле для обновления: "symbol" и/или "name"');
+  }
+  const symbol = hasSymbol ? patch.symbol : undefined;
+  if (symbol !== undefined && typeof symbol !== 'string') {
+    throw ApiError.invalidName('Поле "symbol" должно быть строкой из одного символа');
+  }
+  const name = hasName ? patch.name : undefined;
+  if (name !== undefined && name !== null && typeof name !== 'string') {
+    throw ApiError.invalidName(`Поле "name" — строка (не длиннее ${MAX_TYPE_NAME_LEN}) или null (без имени)`);
+  }
+  if (typeof symbol === 'string') {
+    if (symbol.length !== 1) {
+      throw ApiError.invalidName(`Символ типа — ОДИН символ (получено: «${symbol}»)`);
+    }
+    if (symbol === '.' || symbol === '*') {
+      throw ApiError.invalidName(`Символ «${symbol}» зарезервирован и не может быть символом типа`);
+    }
+  }
+  if (typeof name === 'string' && name.length > MAX_TYPE_NAME_LEN) {
+    throw ApiError.invalidName(`Имя типа длиннее ${MAX_TYPE_NAME_LEN} символов`);
+  }
+
+  const cur = catalog.types[id];
+  if (cur === undefined) throw ApiError.typeNotFound(id);
+
+  // Уникальность symbol в каталоге: занят другим id → 422 с id владельца.
+  if (typeof symbol === 'string' && symbol !== cur.symbol) {
+    const owner = Object.entries(catalog.types).find(([otherId, def]) => otherId !== id && def.symbol === symbol)?.[0];
+    if (owner !== undefined) {
+      throw ApiError.unprocessable(`Символ «${symbol}» уже занят типом «${owner}» в общем каталоге`);
+    }
+  }
+
+  const nextDef: CatalogTypeDef = {
+    symbol: typeof symbol === 'string' ? symbol : cur.symbol,
+    name: hasName ? (name as string | null) : cur.name,
+  };
+  const changed = nextDef.symbol !== cur.symbol || nextDef.name !== cur.name;
+  if (!changed) return { catalog, changed: false };
+  return {
+    catalog: { types: { ...catalog.types, [id]: nextDef }, updatedAt: nowIso },
+    changed: true,
+  };
+}
+
+/**
+ * Чистое удаление записи из каталога (ST-3). id не существует → 404.
+ * УДАЛЯЕТСЯ ТОЛЬКО запись глобального каталога — spec.yaml проектов НЕ
+ * трогаются: проект с этим типом сохранит своё локальное определение, и при
+ * следующем seed/merge из проектов тип может ВОЗРОСИТЬСЯ, если он ещё есть в
+ * каком-то spec.yaml (корректное поведение, не баг).
+ */
+export function applyCatalogRemove(
+  catalog: TypesCatalog,
+  id: string,
+  nowIso: string,
+): { catalog: TypesCatalog; changed: boolean } {
+  if (!(id in catalog.types)) throw ApiError.typeNotFound(id);
+  const types = { ...catalog.types };
+  delete types[id];
+  return { catalog: { types, updatedAt: nowIso }, changed: true };
+}
+
 // ---------------------------------------------------------------------------
 // fs-операции над <workspaceDir>/types-catalog.json
 // ---------------------------------------------------------------------------
@@ -159,6 +244,39 @@ export async function ensureTypesCatalog(workspaceDir: string, now: Clock): Prom
   const existing = await readCatalogFile(workspaceDir);
   if (existing !== null) return existing;
   return seedCatalogFromProjects(workspaceDir, now);
+}
+
+/**
+ * PATCH (ST-3): обновление записи каталога. Файла нет → сначала seed по
+ * проектам (как GET), затем applyCatalogUpdate; файл перезаписывается только
+ * при фактическом изменении (no-op — без записи). Изменяется ТОЛЬКО глобальный
+ * каталог, spec.yaml проектов не трогаются.
+ */
+export async function patchCatalogType(
+  workspaceDir: string,
+  id: string,
+  patch: { symbol?: unknown; name?: unknown },
+  now: Clock,
+): Promise<TypesCatalog> {
+  const current = await ensureTypesCatalog(workspaceDir, now);
+  const { catalog, changed } = applyCatalogUpdate(current, id, patch, now().toISOString());
+  if (changed) await writeCatalogFile(workspaceDir, catalog);
+  return catalog;
+}
+
+/**
+ * DELETE (ST-3): удаление записи из каталога. СМ applyCatalogRemove: проекты
+ * не трогаются, тип может возродиться при следующем seed/merge.
+ */
+export async function removeCatalogType(
+  workspaceDir: string,
+  id: string,
+  now: Clock,
+): Promise<TypesCatalog> {
+  const current = await ensureTypesCatalog(workspaceDir, now);
+  const { catalog } = applyCatalogRemove(current, id, now().toISOString());
+  await writeCatalogFile(workspaceDir, catalog);
+  return catalog;
 }
 
 /**

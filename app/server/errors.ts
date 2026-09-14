@@ -37,6 +37,10 @@ export class ApiError extends Error {
   static unprocessable(message: string): ApiError {
     return new ApiError(422, 'UNPROCESSABLE', message);
   }
+  /** 404 — тип не найден в общем каталоге (ST-3). */
+  static typeNotFound(id: string): ApiError {
+    return new ApiError(404, 'TYPE_NOT_FOUND', `Тип «${id}» не найден в общем каталоге`);
+  }
   static workspaceUnavailable(message: string): ApiError {
     return new ApiError(500, 'WORKSPACE_UNAVAILABLE', message);
   }
