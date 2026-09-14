@@ -39,9 +39,8 @@ const POLL_MS = 1500;
 const LIMIT_DEFAULTS = { maxIterations: '5', timeBudgetPerRun: '2.0' };
 
 const sectionStyle: CSSProperties = { borderTop: '1px solid #ddd', paddingTop: 8, marginTop: 6 };
+// Кнопки — единая система styles.css (.btn / .btn-row).
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 };
-const btnStyle: CSSProperties = { padding: '3px 8px', cursor: 'pointer' };
-const disabledBtnStyle: CSSProperties = { ...btnStyle, cursor: 'not-allowed', opacity: 0.5 };
 const statusStyle: CSSProperties = { color: '#555', fontSize: 12, marginTop: 2 };
 const errorStyle: CSSProperties = { color: '#c62828', fontSize: 12, marginTop: 4 };
 const okStyle: CSSProperties = { color: '#2e7d32', fontSize: 12, marginTop: 4 };
@@ -340,10 +339,11 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
           </div>
           <div style={{ color: '#888', fontSize: 11 }}>{ru.llm.limitsHint}</div>
 
-          <div style={rowStyle}>
+          {/* Две кнопки в ряду — равные высоты, ширина auto (btn-row). */}
+          <div className="btn-row" style={rowStyle}>
             <button
               type="button"
-              style={canStart ? btnStyle : disabledBtnStyle}
+              className="btn"
               disabled={!canStart}
               aria-busy={starting || running || undefined}
               onClick={() => void onStart()}
@@ -352,7 +352,7 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
             </button>
             <button
               type="button"
-              style={running ? btnStyle : disabledBtnStyle}
+              className="btn"
               disabled={!running}
               onClick={() => void onStop()}
             >
@@ -561,7 +561,8 @@ function SessionRow(props: { slug: string; info: LlmSessionSummary; open: boolea
         <span title={props.info.promptPreview} style={{ fontSize: 12 }}>
           {props.info.sessionId} · {ru.llm.statusLabels[props.info.status]} · {props.info.modelId} · {dateLabel}
         </span>
-        <button type="button" style={btnStyle} onClick={props.onToggle}>
+        {/* Ряд с текстом — кнопка auto-ширины (правило 3 styles.css). */}
+        <button type="button" className="btn" onClick={props.onToggle}>
           {props.open ? ru.llm.closeJournal : ru.llm.openJournal}
         </button>
       </div>

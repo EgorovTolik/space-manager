@@ -48,10 +48,11 @@ const DEFAULT_RULES: Rules = {
   touchAll: false,
 };
 
+// Кнопки — единая система styles.css (.btn / .btn-row / .btn-block).
+// rowStyle — для СТРОК С ИНПУТАМИ (кнопки в них остаются auto-ширины, правило 3).
 const sectionStyle: CSSProperties = { marginBottom: 14 };
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 };
-const btnStyle: CSSProperties = { padding: '3px 8px', cursor: 'pointer' };
-const disabledBtnStyle: CSSProperties = { ...btnStyle, cursor: 'not-allowed', opacity: 0.5 };
+const btnRowStyle: CSSProperties = { marginTop: 4 };
 const statusStyle: CSSProperties = { color: '#555', fontSize: 12, marginTop: 2 };
 const errorStyle: CSSProperties = { color: '#c62828', fontSize: 12, marginTop: 4 };
 const okStyle: CSSProperties = { color: '#2e7d32', fontSize: 12, marginTop: 4 };
@@ -512,10 +513,11 @@ export default function ProjectFilesPanel(): JSX.Element {
         ) : (
           <div style={statusStyle}>{ru.project.notSelected}</div>
         )}
-        <div style={rowStyle}>
+        {/* Одиночная кнопка в ряду → на всю ширину (btn-row + btn-block). */}
+        <div className="btn-row" style={btnRowStyle}>
           <button
             type="button"
-            style={btnStyle}
+            className="btn btn-block"
             onClick={() => {
               setShowCreate((v) => !v);
               setCreateError(null);
@@ -537,7 +539,8 @@ export default function ProjectFilesPanel(): JSX.Element {
                 {ru.files.height}:{' '}
                 <input value={createH} onChange={(e) => setCreateH(e.target.value)} style={{ width: 60 }} />
               </label>
-              <button type="button" style={btnStyle} onClick={createSpec}>
+              {/* Ряд с инпутами — кнопка auto-ширины (правило 3 styles.css). */}
+              <button type="button" className="btn" onClick={createSpec}>
                 {ru.common.apply}
               </button>
             </div>
@@ -565,7 +568,8 @@ export default function ProjectFilesPanel(): JSX.Element {
                 style={{ width: 60 }}
                 aria-label={ru.files.height}
               />
-              <button type="button" style={btnStyle} onClick={applySize}>
+              {/* Ряд с инпутами W×H — кнопка auto-ширины (правило 3 styles.css). */}
+              <button type="button" className="btn" onClick={applySize}>
                 {ru.common.apply}
               </button>
             </div>
@@ -596,10 +600,11 @@ export default function ProjectFilesPanel(): JSX.Element {
 
       {/* ── Сохранение и генерация (docs-unified/04 §1.5–§1.6) ── */}
       <div style={{ ...sectionStyle, borderTop: '1px solid #ddd', paddingTop: 8 }}>
-        <div style={rowStyle}>
+        {/* Одиночная кнопка в ряду → на всю ширину (btn-row + btn-block). */}
+        <div className="btn-row" style={btnRowStyle}>
           <button
             type="button"
-            style={canSave ? btnStyle : disabledBtnStyle}
+            className="btn btn-block"
             disabled={!canSave}
             title={!spec ? ru.grid.noSpec : !selected ? ru.project.notSelected : undefined}
             onClick={() => void saveToProject()}
@@ -608,10 +613,11 @@ export default function ProjectFilesPanel(): JSX.Element {
             {dirtyDot(anyDirty)}
           </button>
         </div>
+        {/* Ряд генерации — кнопка рядом с инпутом seed: auto-ширина (правило 3). */}
         <div style={rowStyle}>
           <button
             type="button"
-            style={canSave ? btnStyle : disabledBtnStyle}
+            className="btn"
             disabled={!canSave}
             aria-busy={generating || undefined}
             title={!spec ? ru.grid.noSpec : !selected ? ru.project.notSelected : undefined}
@@ -705,16 +711,16 @@ function MaskSection(props: {
   onAdd: () => void;
   onRemove: () => void;
 }): JSX.Element {
-  const s = props.disabled ? disabledBtnStyle : btnStyle;
   return (
     <div style={sectionStyle}>
       <strong>{props.title}</strong>
       <div style={statusStyle}>{props.status}</div>
-      <div style={rowStyle}>
-        <button type="button" style={s} disabled={props.disabled} title={props.disabled ? ru.grid.noSpec : undefined} onClick={props.onAdd}>
+      {/* Две кнопки в ряду — равные высоты, ширина auto (btn-row). */}
+      <div className="btn-row" style={{ ...btnRowStyle, flexWrap: 'wrap' }}>
+        <button type="button" className="btn" disabled={props.disabled} title={props.disabled ? ru.grid.noSpec : undefined} onClick={props.onAdd}>
           {ru.files.addMask}
         </button>
-        <button type="button" style={s} disabled={props.disabled} onClick={props.onRemove}>
+        <button type="button" className="btn" disabled={props.disabled} onClick={props.onRemove}>
           ✕ {ru.buttons.remove}
         </button>
       </div>
@@ -762,7 +768,8 @@ function ResultRow(props: { slug: string; info: ResultInfo }): JSX.Element {
         <span title={props.info.mtimeIso} style={{ fontSize: 12 }}>
           {props.info.name} · {dateLabel}
         </span>
-        <button type="button" style={btnStyle} onClick={() => void toggle()}>
+        {/* Ряд с текстом и ссылкой — кнопка auto-ширины (правило 3 styles.css). */}
+        <button type="button" className="btn" onClick={() => void toggle()}>
           {open ? ru.project.closeReport : ru.project.openReport}
         </button>
         <a

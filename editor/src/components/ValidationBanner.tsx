@@ -17,10 +17,15 @@ export default function ValidationBanner(): JSX.Element {
 
   return (
     <section className="panel validation-banner" style={errors.length > 0 ? warnStyle : okStyle}>
+      {/* Единственная кнопка панели — на всю ширину (правило одиночной кнопки
+          styles.css); прозрачный «текстовый» вид сохранён инлайн-стилями. */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         style={{
+          display: 'block',
+          width: '100%',
+          textAlign: 'left',
           background: 'none',
           border: 'none',
           padding: 0,

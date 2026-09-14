@@ -67,6 +67,13 @@ export interface MockOpts {
   /** Общий список типов (ST-2): тело GET /api/types-catalog.
    * Без параметра — пустой каталог { types: {} } (реальный сервер не нужен). */
   catalog?: Record<string, { symbol: string; name: string | null }>;
+  /** Мутации каталога (ST-4): обработчик PATCH/DELETE /api/types-catalog/:id.
+   * Без параметра — 200 с неизменным opts.catalog (реальный сервер не нужен). */
+  catalogMutate?: (
+    method: 'PATCH' | 'DELETE',
+    id: string,
+    body?: Record<string, unknown>,
+  ) => { status?: number; body?: unknown };
 }
 
 export async function mockProject(
@@ -219,6 +226,29 @@ export async function mockProject(
       body: JSON.stringify({ types: opts.catalog ?? {} }),
     }),
   );
+
+  // Мутации каталога (ST-4): PATCH/DELETE /api/types-catalog/:id.
+  await page.route(/\/api\/types-catalog\/[^/]+$/, (route) => {
+    const req = route.request();
+    const method = req.method() as 'PATCH' | 'DELETE';
+    if (method !== 'PATCH' && method !== 'DELETE') {
+      return route.fulfill({
+        status: 405,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify({ error: 'METHOD_NOT_ALLOWED', message: 'метод не поддерживается' }),
+      });
+    }
+    const id = req.url().split('/').pop() ?? '';
+    const body = method === 'PATCH' ? (req.postDataJSON() ?? {}) : undefined;
+    const resp = opts.catalogMutate
+      ? opts.catalogMutate(method, id, body)
+      : { status: 200, body: { types: opts.catalog ?? {} } };
+    return route.fulfill({
+      status: resp.status ?? 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify(resp.body),
+    });
+  });
 
   await page.route(/\/api\/projects\/[^/]+\/generate/, (route) => {
     const i = captured.events.filter((e) => e === 'generate').length;

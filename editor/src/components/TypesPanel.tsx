@@ -15,17 +15,31 @@
 // привязан к кластеру(ам) (сообщение под секцией, состояние не меняется); отметка
 // запрещена, если symbol занят другим типом проекта (V-TYPE-SYMDUP) — чекбокс
 // disabled с подсказкой. Типы проекта вне каталога — строки «вне общего списка».
+//
+// ST-4: на строках КАТАЛОЖНЫХ типов (не «вне общего списка») — инлайн-редактирование
+// (✎ → форма в стиле editingId; symbol/name; PATCH /api/types-catalog/:id) и удаление
+// (🗑 → единый confirm панели; DELETE). После успеха — кэш каталога обновляется из
+// ответа сервера (patchCatalog/deleteCatalog lib/typesCatalog); ошибки 400/404/422 —
+// сообщение под секцией. Семантика: правится только общий список, спеки проектов не
+// меняются (служебная строка catalogNote).
 import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ru } from '../i18n/ru';
 import { useEditor } from '../state/editorStore';
 import { isValidTypeId, symbolError } from '../lib/fileUtils';
-import { catalogRows, catalogToggleDecision, getTypesCatalog, subscribeTypesCatalog } from '../lib/typesCatalog';
+import {
+  catalogPatchBody,
+  catalogRows,
+  catalogToggleDecision,
+  deleteCatalog,
+  getTypesCatalog,
+  patchCatalog,
+  subscribeTypesCatalog,
+} from '../lib/typesCatalog';
 import type { CatalogTypes } from '../lib/typesCatalog';
 import type { SpecDoc } from '../lib/types';
 
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' };
-const btnStyle: CSSProperties = { cursor: 'pointer', padding: '2px 6px' };
 const fieldStyle: CSSProperties = { display: 'block', marginTop: 8 };
 const labelStyle: CSSProperties = { fontSize: 12, color: '#555' };
 const errorStyle: CSSProperties = { color: '#c62828', fontSize: 12, marginTop: 2 };
@@ -46,6 +60,9 @@ export default function TypesPanel(): JSX.Element {
   const [catalog, setCatalog] = useState<CatalogTypes | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [blockMsg, setBlockMsg] = useState<string | null>(null);
+  // ST-4: инлайн-редактирование каталожного типа + ошибка операции с каталогом.
+  const [catalogEditId, setCatalogEditId] = useState<string | null>(null);
+  const [catalogActionError, setCatalogActionError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,9 +165,10 @@ export default function TypesPanel(): JSX.Element {
 
   return (
     <section className="panel" style={{ padding: 8 }}>
+      {/* «＋ Добавить» — рядом с заголовком: не btn-row, ширина auto (правило 3 styles.css). */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ margin: 0 }}>{ru.panels.types}</h2>
-        <button type="button" style={btnStyle} onClick={() => setEditingId('new')}>
+        <button type="button" className="btn" onClick={() => setEditingId('new')}>
           {ru.types.addBtn}
         </button>
       </div>
@@ -191,17 +209,58 @@ export default function TypesPanel(): JSX.Element {
             <span style={{ flex: 1, color: '#777', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {spec.types[id].name ?? ''}
             </span>
-            <button type="button" style={btnStyle} title="Редактировать" onClick={() => setEditingId(id)}>
+            {/* Кнопки строки — в самой строке с данными (не btn-row), ширина auto. */}
+            <button type="button" className="btn" title="Редактировать" onClick={() => setEditingId(id)}>
               ✎
             </button>
-            <button type="button" style={btnStyle} title="Удалить" onClick={() => removeType(id)}>
+            <button type="button" className="btn" title="Удалить" onClick={() => removeType(id)}>
               ✕
             </button>
           </div>
         ))
       )}
 
-      {catalogSection(catalog, catalogError, spec, onCatalogToggle, blockMsg)}
+      {catalogSection(
+        catalog,
+        catalogError,
+        spec,
+        onCatalogToggle,
+        blockMsg,
+        catalogEditId,
+        (id) => {
+          setCatalogActionError(null);
+          setCatalogEditId(id);
+        },
+        () => {
+          setCatalogEditId(null);
+          setCatalogActionError(null);
+        },
+        (id, symbol, name) => {
+          void (async (): Promise<void> => {
+            setCatalogActionError(null);
+            try {
+              // ST-4: PATCH — правится только общий список; кэш обновляется из ответа.
+              await patchCatalog(id, catalogPatchBody(symbol, name));
+              setCatalogEditId(null);
+            } catch (e) {
+              setCatalogActionError(errText(e));
+            }
+          })();
+        },
+        (id) => {
+          // ST-4: удаление каталожного типа — единый механизм confirm панели.
+          if (!window.confirm(ru.types.catalogRemoveConfirm.replace('{id}', id))) return;
+          void (async (): Promise<void> => {
+            setCatalogActionError(null);
+            try {
+              await deleteCatalog(id); // кэш обновится из ответа — строка исчезнет
+            } catch (e) {
+              setCatalogActionError(errText(e));
+            }
+          })();
+        },
+        catalogActionError,
+      )}
     </section>
   );
 }
@@ -214,8 +273,20 @@ function catalogSection(
   spec: SpecDoc,
   onToggle: (id: string) => void,
   blockMsg: string | null,
+  // ST-4: инлайн-редактирование/удаление каталожных типов.
+  editId: string | null,
+  onEdit: (id: string) => void,
+  onEditCancel: () => void,
+  onEditSave: (id: string, symbol: string, name: string) => void,
+  onDelete: (id: string) => void,
+  actionError: string | null,
 ): JSX.Element {
   const rows = catalog !== null ? catalogRows(catalog, spec) : [];
+  // Редактируемый каталожный тип (narrowed — для формы); id неизменяем.
+  const editing =
+    editId !== null && catalog !== null && catalog[editId] !== undefined
+      ? { id: editId, def: catalog[editId] }
+      : null;
   return (
     <div className="types-catalog" style={{ borderTop: '1px dashed #ccc', marginTop: 8, paddingTop: 6 }}>
       <strong>{ru.types.catalogTitle}</strong>
@@ -230,13 +301,23 @@ function catalogSection(
       {catalog !== null && rows.length === 0 && (
         <div style={{ color: '#888', fontSize: 12 }}>{ru.types.catalogEmpty}</div>
       )}
+      {editing !== null && catalog !== null && (
+        <CatalogTypeForm
+          key={editing.id}
+          id={editing.id}
+          initial={{ symbol: editing.def.symbol, name: editing.def.name ?? '' }}
+          types={catalog}
+          onSave={(symbol, name) => onEditSave(editing.id, symbol, name)}
+          onCancel={onEditCancel}
+        />
+      )}
       {rows.map((r) => {
         const hint =
           r.disableReason !== null
             ? ru.types.symbolUsedBy.replace('{symbol}', r.disableReason.symbol).replace('{id}', r.disableReason.owner)
             : undefined;
         return (
-          <div key={r.id} style={rowStyle}>
+          <div key={r.id} style={rowStyle} data-catalog-row={r.outsideCatalog ? undefined : r.id}>
             <input
               type="checkbox"
               aria-label={r.id}
@@ -264,10 +345,29 @@ function catalogSection(
               </span>
             )}
             <span style={{ flex: 1, color: '#777', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name ?? ''}</span>
+            {/* ST-4: редактирование/удаление — только КАТАЛОЖНЫЕ строки (не «вне общего списка»). */}
+            {!r.outsideCatalog && (
+              <>
+                <button type="button" className="btn" title={ru.types.catalogEditBtn} onClick={() => onEdit(r.id)}>
+                  ✎
+                </button>
+                <button type="button" className="btn" title={ru.types.catalogDeleteBtn} onClick={() => onDelete(r.id)}>
+                  🗑
+                </button>
+              </>
+            )}
           </div>
         );
       })}
       {blockMsg !== null && <div style={errorStyle}>{blockMsg}</div>}
+      {/* ST-4: ошибка операции с каталогом (400/404/422 — текст из ответа сервера). */}
+      {actionError !== null && (
+        <div style={errorStyle}>
+          {ru.types.catalogActionError} {actionError}
+        </div>
+      )}
+      {/* ST-4: служебная строка — изменения касаются только общего списка. */}
+      <div style={{ color: '#888', fontSize: 12, marginTop: 6 }}>{ru.types.catalogNote}</div>
     </div>
   );
 }
@@ -325,14 +425,83 @@ function TypeForm(props: {
         <input value={name} onChange={(e) => setName(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', marginTop: 2 }} />
       </label>
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <button type="button" style={btnStyle} onClick={save}>
+      {/* Ряд кнопок формы: две кнопки — равные высоты, ширина auto (styles.css). */}
+      <div className="btn-row" style={{ marginTop: 10 }}>
+        <button type="button" className="btn" onClick={save}>
           {ru.common.save}
         </button>
-        <button type="button" style={btnStyle} onClick={onCancel}>
+        <button type="button" className="btn" onClick={onCancel}>
           {ru.common.cancel}
         </button>
       </div>
     </div>
   );
+}
+
+// ── Форма каталожного типа (ST-4): symbol + name, PATCH /api/types-catalog/:id ──
+// Валидация symbol — те же проверки, что у реестра типов (fileUtils.symbolError):
+// один символ, ≠ «.»/«*», не занят другим типом каталога. id неизменяем.
+
+function CatalogTypeForm(props: {
+  id: string;
+  initial: { symbol: string; name: string };
+  types: Record<string, { symbol: string; name: string | null }>;
+  onSave: (symbol: string, name: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const { id, initial, types, onSave, onCancel } = props;
+  const [symbol, setSymbol] = useState(initial.symbol);
+  const [name, setName] = useState(initial.name);
+  const [error, setError] = useState<string | null>(null);
+
+  function save(): void {
+    // symbolError с excludeId — символ собственного типа не считается дублем.
+    const se = symbolError(symbol, types, id);
+    if (se === 'invalid') {
+      setError(ru.types.symbolInvalid);
+      return;
+    }
+    if (se === 'reserved') {
+      setError(ru.types.symbolReserved);
+      return;
+    }
+    if (se === 'duplicate') {
+      setError(ru.types.symbolDup);
+      return;
+    }
+    setError(null);
+    onSave(symbol, name.trim());
+  }
+
+  return (
+    <div style={modalStyle} data-catalog-form={id}>
+      <strong>{ru.types.catalogEditTitle}: {id}</strong>
+
+      <label style={fieldStyle}>
+        <span style={labelStyle}>{ru.types.symbolLabel} *</span>
+        <input value={symbol} onChange={(e) => setSymbol(e.target.value)} maxLength={2} style={{ width: 60, marginTop: 2 }} />
+        {error !== null && <span style={errorStyle}>{error}</span>}
+      </label>
+
+      <label style={fieldStyle}>
+        <span style={labelStyle}>{ru.types.nameLabel}</span>
+        {/* maxLength 64 — ограничение сервера (400 при превышении). */}
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={64} style={{ width: '100%', boxSizing: 'border-box', marginTop: 2 }} />
+      </label>
+
+      <div className="btn-row" style={{ marginTop: 10 }}>
+        <button type="button" className="btn" onClick={save}>
+          {ru.common.save}
+        </button>
+        <button type="button" className="btn" onClick={onCancel}>
+          {ru.common.cancel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function errText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return String(e);
 }

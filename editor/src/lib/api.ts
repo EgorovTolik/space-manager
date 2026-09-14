@@ -107,6 +107,33 @@ export async function fetchTypesCatalog(): Promise<TypesCatalog> {
   return (await res.json()) as TypesCatalog;
 }
 
+/** Изменение типа каталога (ST-4): `PATCH /api/types-catalog/:id`, тело
+ * `{symbol?, name?}`. Правится ТОЛЬКО глобальный каталог — спеки проектов не
+ * меняются. Ошибки: 400 (битый symbol «.»/«*»/не один символ, name > 64,
+ * пустое тело), 404 (нет id), 422 (symbol занят другим типом — id владельца в
+ * сообщении). Ответ — обновлённый каталог целиком. */
+export async function patchTypesCatalog(
+  id: string,
+  patch: { symbol?: string; name?: string | null },
+): Promise<TypesCatalog> {
+  const res = await fetch(`/api/types-catalog/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as TypesCatalog;
+}
+
+/** Удаление типа из каталога (ST-4): `DELETE /api/types-catalog/:id`.
+ * Семантика та же — глобальный каталог, спеки проектов не меняются; 404 (нет id).
+ * Ответ — обновлённый каталог целиком. */
+export async function deleteTypesCatalog(id: string): Promise<TypesCatalog> {
+  const res = await fetch(`/api/types-catalog/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as TypesCatalog;
+}
+
 /** Запись списка ревизий генерации (`GET …/<p>/results`, docs-unified/02 §6.11). */
 export interface ResultInfo {
   name: string; // имя файла result-<ts>.txt

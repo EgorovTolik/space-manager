@@ -120,6 +120,14 @@ export const ru = {
       'Тип привязан к кластеру(ам) {list} — сначала измените или удалите кластер',
     symbolUsedBy: 'символ «{symbol}» уже используется типом {id}',
     outsideCatalog: 'вне общего списка',
+    // Редактирование/удаление каталожных типов (ST-4: PATCH/DELETE /api/types-catalog/:id).
+    catalogEditTitle: 'Редактировать тип (общий список)',
+    catalogEditBtn: 'Редактировать в общем списке',
+    catalogDeleteBtn: 'Удалить из общего списка',
+    catalogRemoveConfirm: 'Удалить тип {id} из общего списка типов?',
+    catalogActionError: 'Операция с общим списком типов не удалась:',
+    catalogNote:
+      'Изменения касаются только общего списка типов; уже созданные проекты не затрагиваются.',
   },
   rules: {
     connectivityLabel: 'Связность',

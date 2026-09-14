@@ -8,7 +8,7 @@
 //   (иначе нарушится V-TYPE-SYMDUP).
 // Типы проекта, отсутствующие в каталоге (ещё ни разу не сохранены), отображаются
 // строками «вне общего списка» внизу секции — список = каталог + дополнения проекта.
-import { fetchTypesCatalog } from './api';
+import { deleteTypesCatalog, fetchTypesCatalog, patchTypesCatalog } from './api';
 import type { TypesCatalog } from './api';
 import type { SpecDoc } from './types';
 
@@ -54,6 +54,43 @@ export function refreshTypesCatalog(): void {
   cache = null;
   // Сбой повторного fetch не критичен (пока живёт старый кэш UI) — без unhandled rejection.
   void load(true).catch(() => {});
+}
+
+// ── Изменения каталога (ST-4): PATCH/DELETE + обновление сессионного кэша ──────
+// Сервер возвращает обновлённый каталог ЦЕЛИКОМ — просто подменяем кэш и
+// уведомляем подписчиков (тот же механизм, что при fetch). Семантика: правится
+// только глобальный каталог, спеки проектов не меняются.
+
+function applyCatalogResponse(types: CatalogTypes): void {
+  cache = types;
+  for (const l of listeners) l(types);
+}
+
+/** `PATCH /api/types-catalog/:id` {symbol?, name?} → обновлённый каталог. */
+export async function patchCatalog(
+  id: string,
+  patch: { symbol?: string; name?: string | null },
+): Promise<CatalogTypes> {
+  const r = await patchTypesCatalog(id, patch);
+  applyCatalogResponse(r.types);
+  return r.types;
+}
+
+/** `DELETE /api/types-catalog/:id` → обновлённый каталог (строка исчезает из секции). */
+export async function deleteCatalog(id: string): Promise<CatalogTypes> {
+  const r = await deleteTypesCatalog(id);
+  applyCatalogResponse(r.types);
+  return r.types;
+}
+
+/** Тело PATCH /api/types-catalog/:id из полей инлайн-формы (чистый маппинг):
+ * symbol как введён, name — обрезанный; пустое name → null (сервер очищает name). */
+export function catalogPatchBody(
+  symbol: string,
+  name: string,
+): { symbol: string; name: string | null } {
+  const t = name.trim();
+  return { symbol, name: t === '' ? null : t };
 }
 
 // ── Чистые guard-функции (unit-тестируемые, без React и fetch) ─────────────────

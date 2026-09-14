@@ -1,12 +1,16 @@
 // ST-2: чистые guard-функции общего списка типов (lib/typesCatalog).
 // Привязан к кластеру → снятие блока; дубль symbol → отметка блока; свободный тип → ок.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SpecDoc } from '../../src/lib/types';
 import {
+  catalogPatchBody,
   catalogRows,
   catalogToggleDecision,
   clusterIdsOfType,
+  deleteCatalog,
   findSymbolOwner,
+  patchCatalog,
+  subscribeTypesCatalog,
 } from '../../src/lib/typesCatalog';
 
 const SPEC: SpecDoc = {
@@ -127,5 +131,78 @@ describe('catalogRows (маппинг каталог + spec.types → чекбо
     const rows = catalogRows({}, SPEC);
     expect(rows.map((r) => r.id)).toEqual(['A', 'D']);
     expect(rows.every((r) => r.outsideCatalog && r.checked)).toBe(true);
+  });
+});
+
+// ST-4: мутации каталога (PATCH/DELETE) — тело из формы + обновление сессионного кэша.
+
+describe('catalogPatchBody', () => {
+  it('symbol как введён; name обрезается, пустое → null', () => {
+    expect(catalogPatchBody('B', 'Тип B')).toEqual({ symbol: 'B', name: 'Тип B' });
+    expect(catalogPatchBody('Q', '   ')).toEqual({ symbol: 'Q', name: null });
+    expect(catalogPatchBody('Z', '  имя  ')).toEqual({ symbol: 'Z', name: 'имя' });
+  });
+});
+
+const CATALOG_AFTER = {
+  B: { symbol: 'B', name: 'Тип B (изменён)' },
+  D: { symbol: 'D', name: null },
+};
+
+/** Мок fetch для /api/types-catalog/:id: статус + тело JSON ({types} или {error,message}). */
+function stubCatalogFetch(status: number): ReturnType<typeof vi.fn> {
+  return vi.fn(
+    (_input: RequestInfo | URL, init?: RequestInit) =>
+      Promise.resolve({
+        ok: status < 400,
+        status,
+        json: async () =>
+          status < 400
+            ? { types: CATALOG_AFTER }
+            : { error: 'SYMBOL_TAKEN', message: `mock ${init?.method ?? ''}` },
+      }),
+  );
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('patchCatalog / deleteCatalog (кэш + подписка)', () => {
+  it('успех → кэш = ответ сервера, подписчики уведомлены, метод/URL корректны', async () => {
+    const fetchMock = stubCatalogFetch(200);
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    const seen: Record<string, unknown>[] = [];
+    const unsub = subscribeTypesCatalog((t) => seen.push(t));
+
+    const patched = await patchCatalog('B', { symbol: 'B', name: 'Тип B (изменён)' });
+    expect(patched).toEqual(CATALOG_AFTER);
+    // PATCH /api/types-catalog/B с JSON-телом.
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/types-catalog/B');
+    expect(init?.method).toBe('PATCH');
+    expect(JSON.parse(init?.body as string)).toEqual({ symbol: 'B', name: 'Тип B (изменён)' });
+
+    const deleted = await deleteCatalog('D');
+    expect(deleted).toEqual(CATALOG_AFTER);
+    const [url2, init2] = fetchMock.mock.calls[1];
+    expect(url2).toBe('/api/types-catalog/D');
+    expect(init2?.method).toBe('DELETE');
+
+    // Оба события дошли до подписчика (кэш обновлён каждым ответом).
+    expect(seen.length).toBe(2);
+    unsub();
+  });
+
+  it('422 (symbol занят) → ApiError с текстом сервера и статусом 422', async () => {
+    const fetchMock = stubCatalogFetch(422);
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    await expect(patchCatalog('B', { symbol: 'D' })).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 422,
+      message: expect.stringContaining('mock PATCH'),
+    });
   });
 });

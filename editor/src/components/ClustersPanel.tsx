@@ -14,7 +14,6 @@ import { SUM_EPSILON } from '../lib/validation';
 import { clustersPercentSum, formatNumber, freePercent, parseAreaPercent } from '../lib/fileUtils';
 
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' };
-const btnStyle: CSSProperties = { cursor: 'pointer', padding: '2px 6px' };
 const fieldStyle: CSSProperties = { display: 'block', marginTop: 8 };
 const labelStyle: CSSProperties = { fontSize: 12, color: '#555' };
 const errorStyle: CSSProperties = { color: '#c62828', fontSize: 12, marginTop: 4 };
@@ -58,9 +57,10 @@ export default function ClustersPanel(): JSX.Element {
 
   return (
     <section className="panel" style={{ padding: 8 }}>
+      {/* «＋ Добавить» — рядом с заголовком: не btn-row, ширина auto (правило 3 styles.css). */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ margin: 0 }}>{ru.panels.clusters}</h2>
-        <button type="button" style={btnStyle} onClick={() => setEditing('new')}>
+        <button type="button" className="btn" onClick={() => setEditing('new')}>
           {ru.clusters.addBtn}
         </button>
       </div>
@@ -90,10 +90,11 @@ export default function ClustersPanel(): JSX.Element {
             <span style={{ flex: '0 0 auto', color: '#555' }}>{c.type}</span>
             <span style={{ flex: '0 0 auto', color: '#555' }}>{formatNumber(c.areaPercent)}%</span>
             <span style={{ flex: 1, color: '#777' }}>{c.shape}</span>
-            <button type="button" style={btnStyle} title="Редактировать" onClick={() => setEditing(c)}>
+            {/* Кнопки строки — в самой строке с данными (не btn-row), ширина auto. */}
+            <button type="button" className="btn" title="Редактировать" onClick={() => setEditing(c)}>
               ✎
             </button>
-            <button type="button" style={btnStyle} title="Удалить" onClick={() => removeCluster(c.id)}>
+            <button type="button" className="btn" title="Удалить" onClick={() => removeCluster(c.id)}>
               ✕
             </button>
           </div>
@@ -213,11 +214,12 @@ function ClusterForm(props: {
         </ul>
       )}
 
-      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <button type="button" style={btnStyle} onClick={save}>
+      {/* Ряд кнопок формы: две кнопки — равные высоты, ширина auto (styles.css). */}
+      <div className="btn-row" style={{ marginTop: 10 }}>
+        <button type="button" className="btn" onClick={save}>
           {ru.common.save}
         </button>
-        <button type="button" style={btnStyle} onClick={onCancel}>
+        <button type="button" className="btn" onClick={onCancel}>
           {ru.common.cancel}
         </button>
       </div>

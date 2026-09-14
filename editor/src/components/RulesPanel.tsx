@@ -12,8 +12,9 @@ import { useEditor } from '../state/editorStore';
 import type { Rules } from '../lib/types';
 import { pairsContain } from '../lib/fileUtils';
 
+// Кнопки — единая система styles.css (.btn). Все ряды панели — строки с
+// инпутами/текстом (правило 3): кнопки остаются auto-ширины.
 const sectionStyle: CSSProperties = { marginTop: 12 };
-const btnStyle: CSSProperties = { cursor: 'pointer', padding: '2px 6px' };
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 };
 const errorStyle: CSSProperties = { color: '#c62828', fontSize: 12, marginTop: 4 };
 const hintStyle: CSSProperties = { fontSize: 11, color: '#888', marginTop: 2 };
@@ -154,7 +155,7 @@ export default function RulesPanel(): JSX.Element {
               <span>
                 {a} × {b}
               </span>
-              <button type="button" style={btnStyle} title="Удалить пару" onClick={() => removePair('forbidden', i)}>
+              <button type="button" className="btn" title="Удалить пару" onClick={() => removePair('forbidden', i)}>
                 ✕
               </button>
             </div>
@@ -164,7 +165,8 @@ export default function RulesPanel(): JSX.Element {
           {typeOptions(forbidA, setForbidA)}
           <span>×</span>
           {typeOptions(forbidB, setForbidB)}
-          <button type="button" style={btnStyle} onClick={() => addPair('forbidden')}>
+          {/* Ряд с селекторами — кнопка auto-ширины (правило 3 styles.css). */}
+          <button type="button" className="btn" onClick={() => addPair('forbidden')}>
             {ru.rules.addPair}
           </button>
         </div>
@@ -188,7 +190,7 @@ export default function RulesPanel(): JSX.Element {
                   <span>
                     {a} × {b}
                   </span>
-                  <button type="button" style={btnStyle} title="Удалить пару" onClick={() => removePair('allow', i)}>
+                  <button type="button" className="btn" title="Удалить пару" onClick={() => removePair('allow', i)}>
                     ✕
                   </button>
                 </div>
@@ -198,7 +200,8 @@ export default function RulesPanel(): JSX.Element {
               {typeOptions(allowA, setAllowA)}
               <span>×</span>
               {typeOptions(allowB, setAllowB)}
-              <button type="button" style={btnStyle} onClick={() => addPair('allow')}>
+              {/* Ряд с селекторами — кнопка auto-ширины (правило 3 styles.css). */}
+              <button type="button" className="btn" onClick={() => addPair('allow')}>
                 {ru.rules.addPair}
               </button>
             </div>

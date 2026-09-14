@@ -30,7 +30,9 @@ const styles: Record<string, CSSProperties> = {
   left: { display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' },
   center: { display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0, minHeight: 0 },
   right: { display: 'flex', flexDirection: 'column', gap: '8px', overflowY: 'auto' },
-  tabRow: { display: 'flex', gap: 4 },
+  // Табы — функциональная группа (правило 4 styles.css): собственные инлайн-стили
+  // active/disabled, но ряд помечен btn-row для единого габаритного правила.
+  tabRow: { display: 'flex', gap: 4, alignItems: 'stretch' },
 };
 
 type Tab = 'clusters' | 'types' | 'rules';
@@ -77,7 +79,7 @@ function Layout(): JSX.Element {
       <aside style={styles.right}>
         {state.spec ? (
           <>
-            <div style={styles.tabRow}>
+            <div className="btn-row" style={styles.tabRow}>
               {(['clusters', 'types', 'rules'] as const).map((t) => (
                 <button key={t} type="button" style={tabBtn(tab === t)} onClick={() => setTab(t)}>
                   {ru.panels[t]}
