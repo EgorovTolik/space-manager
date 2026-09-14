@@ -79,15 +79,17 @@ button.danger:hover:not(:disabled) {
   background: #fbd2d2;
 }
 
-/* Замечание 3: фиксированные одинаковые размеры у обеих иконок карточки
-   (✎ / 🗑) — тот же бокс, что у .btn-link; содержимое по центру. */
+/* Замечание 3: обе кнопки карточки (✎ / 🗑) — ОДИН класс с фиксированными
+   одинаковыми размерами (высота/padding/шрифт как у «Удалить»): бокс не зависит
+   от ширины эмодзи/подписи, поэтому кнопки не съезжают и всегда равны. */
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 34px;
-  min-height: 27px;
-  padding: 3px 8px;
+  width: 36px;
+  height: 27px;
+  padding: 0;
+  font-size: 14px;
   margin: 2px 4px 2px 0;
 }
 
@@ -239,28 +241,25 @@ input:focus {
   margin-top: 6px;
 }
 
+/* Все превью в одну строку с горизонтальной прокруткой (без «+N»). */
 .preview-strip {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-top: 3px;
-  flex-wrap: wrap;
+  overflow-x: auto;
 }
 
+/* Квадратные миниатюры 64×64, единый размер; картинка — object-fit: cover. */
 .preview-strip img {
+  width: 64px;
   height: 64px;
-  width: auto;
-  max-width: 120px;
-  object-fit: contain;
+  flex: 0 0 auto;
+  object-fit: cover;
   background: #f2f4f7;
   border: 1px solid #e0e0e0;
   border-radius: 3px;
-  padding: 2px;
   cursor: zoom-in;
-}
-
-.preview-more {
-  font-size: 12px;
 }
 
 /* --- Пустое состояние --------------------------------------------------------- */
@@ -343,6 +342,48 @@ input:focus {
   border-radius: 3px;
 }
 
+/* Сцена с картинкой и стрелками навигации по коллекции карточки. */
+.preview-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Крупные полупрозрачные кнопки «←»/«→» по левому/правому краю картинки. */
+.preview-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.38);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.preview-nav:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.preview-nav.prev {
+  left: 8px;
+}
+
+.preview-nav.next {
+  right: 8px;
+}
+
 .preview-caption {
   margin: 0;
+}
+
+/* Счётчик «N / M» в подписи (только если превью больше одного). */
+.preview-counter {
+  margin-left: 6px;
 }

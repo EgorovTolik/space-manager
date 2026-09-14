@@ -20,7 +20,6 @@ import {
   type PreviewEntry,
   type ProjectMeta,
 } from './lib/api';
-import { previewUrl } from './lib/format';
 
 /** ТЗ 02 §5: лимит загрузки 10 МБ — клиентская проверка ДО отправки. */
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
@@ -38,7 +37,7 @@ type ModalState =
   | { type: 'none' }
   | { type: 'rename'; project: ProjectMeta }
   | { type: 'delete'; project: ProjectMeta }
-  | { type: 'preview'; project: ProjectMeta; entry: PreviewEntry };
+  | { type: 'preview'; project: ProjectMeta; entries: PreviewEntry[]; index: number };
 
 export default function App(): JSX.Element {
   const [projects, setProjects] = useState<ProjectMeta[] | null>(null); // null — ещё не загружено
@@ -223,7 +222,12 @@ export default function App(): JSX.Element {
                 previews={previews[p.slug]}
                 onRename={() => setModal({ type: 'rename', project: p })}
                 onDelete={() => setModal({ type: 'delete', project: p })}
-                onPreview={(entry) => setModal({ type: 'preview', project: p, entry })}
+                // Модалка листает ВСЮ коллекцию карточки — передаём список и индекс кликнутого.
+                onPreview={(entry) => {
+                  const list = previews[p.slug] ?? [];
+                  const index = Math.max(0, list.findIndex((e) => e.name === entry.name));
+                  setModal({ type: 'preview', project: p, entries: list, index });
+                }}
               />
             ))}
           </div>
@@ -247,9 +251,9 @@ export default function App(): JSX.Element {
       )}
       {modal.type === 'preview' && (
         <PreviewModal
-          url={previewUrl(modal.project.slug, modal.entry.name)}
-          name={modal.entry.name}
-          mtimeIso={modal.entry.mtimeIso}
+          slug={modal.project.slug}
+          entries={modal.entries}
+          index={modal.index}
           onClose={() => setModal({ type: 'none' })}
         />
       )}

@@ -1,13 +1,11 @@
 // Карточка проекта (ТЗ 03 §1/§2): метрики, действия, ссылки на editor/viewer3d,
-// лента превью (≤8 + «+N»). Для corrupted-проектов всё неактивно кроме удаления.
+// лента превью — ВСЕ файлы в одну строку с горизонтальной прокруткой (без «+N»).
+// Для corrupted-проектов всё неактивно кроме удаления.
 // Замечание 2: заголовок — человекочитаемое имя (project.name), все URL/ссылки
 // используют стабильный project.slug.
 import { ru, t } from '../i18n/ru';
 import type { PreviewEntry, ProjectMeta } from '../lib/api';
 import { editorPath, formatDate, formatSize, previewUrl, viewerPath } from '../lib/format';
-
-/** ТЗ 03 §3: лимит миниатюр на карточке. */
-export const PREVIEW_STRIP_LIMIT = 8;
 
 interface ProjectCardProps {
   project: ProjectMeta;
@@ -20,8 +18,8 @@ interface ProjectCardProps {
 
 export default function ProjectCard({ project, previews, onRename, onDelete, onPreview }: ProjectCardProps): JSX.Element {
   const corrupted = Boolean(project.corrupted);
-  const shown = previews ? previews.slice(0, PREVIEW_STRIP_LIMIT) : [];
-  const hiddenCount = previews ? Math.max(0, previews.length - PREVIEW_STRIP_LIMIT) : 0;
+  // Все превью проекта: лента одна строка, прокрутка (CSS .preview-strip), без усечения.
+  const shown = previews ?? [];
 
   return (
     <article className={`card${corrupted ? ' corrupted' : ''}`}>
@@ -97,7 +95,6 @@ export default function ProjectCard({ project, previews, onRename, onDelete, onP
                 onClick={() => onPreview(e)}
               />
             ))}
-            {hiddenCount > 0 && <span className="muted preview-more">+{hiddenCount}</span>}
           </div>
         </div>
       )}
