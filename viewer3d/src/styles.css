@@ -291,10 +291,22 @@ button.active {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* сужается вместе с панелью, чтобы значение не выходило за правый край (ST-2) */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.opacity-control input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto; /* убираем intrinsic ~129px, из-за которого ряд переполнял панель */
 }
 
 .opacity-value {
-  min-width: 32px;
+  /* фиксированная ширина под «X.XX» (4 знака) — без скачков при изменении значения */
+  flex: none;
+  width: 4ch;
+  font-variant-numeric: tabular-nums;
   text-align: right;
   color: #555;
 }
