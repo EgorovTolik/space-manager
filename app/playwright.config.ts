@@ -5,7 +5,7 @@ import { defineConfig } from '@playwright/test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { e2eWorkspace } from './tests/e2e/workspace';
+import { e2eLlmConfigPath, e2eWorkspace } from './tests/e2e/workspace';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,7 +23,15 @@ export default defineConfig({
   webServer: {
     command: 'npx tsx server/index.ts',
     cwd: here,
-    env: { ...process.env, PORT: '3212', HOST: '127.0.0.1', SPACEMGR_WORKSPACE: e2eWorkspace },
+    env: {
+      ...process.env,
+      PORT: '3212',
+      HOST: '127.0.0.1',
+      SPACEMGR_WORKSPACE: e2eWorkspace,
+      // LLM-конфиг для 11-llm.spec.ts: файл пишется в beforeAll (hot-reload сервером);
+      // до этого LLM-эндпоинты отвечают configured:false — на остальные спеки не влияет.
+      LLM_CONFIG_PATH: e2eLlmConfigPath,
+    },
     url: 'http://127.0.0.1:3212/api/health',
     reuseExistingServer: false,
     timeout: 60_000,

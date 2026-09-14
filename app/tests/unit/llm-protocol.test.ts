@@ -38,6 +38,17 @@ describe('extractFirstJsonBlock', () => {
     expect(extractFirstJsonBlock('просто текст')).toBeNull();
     expect(extractFirstJsonBlock('{"a": {')).toBeNull();
   });
+
+  // LST-6 живой прогон: локальные GGUF-модели часто оборачивают ответ в markdown-заборы.
+  it('markdown-забор ```json … ``` вокруг объекта терпится (LST-6)', () => {
+    const text = 'Вот действие:\n```json\n{"action":"read_result","args":{"file":"result-1.txt"}}\n```\nГотово.';
+    expect(extractFirstJsonBlock(text)).toBe('{"action":"read_result","args":{"file":"result-1.txt"}}');
+  });
+
+  it('забор без языка и с рассуждением после блока (LST-6)', () => {
+    const text = '```\n{"action": "finish", "args": {"candidates": [{"file": "a", "comment": "x"}]}}\n```\nОбоснование: аргументы со скобками {y}.';
+    expect(extractFirstJsonBlock(text)).toBe('{"action": "finish", "args": {"candidates": [{"file": "a", "comment": "x"}]}}');
+  });
 });
 
 describe('parseActionMessage: валидные ответы', () => {
@@ -151,5 +162,13 @@ describe('parseActionMessage: ошибки → ProtocolError', () => {
     expect(FOLLOWUP_MESSAGE).toContain('Верни строго валидный JSON');
     expect(FOLLOWUP_MESSAGE).toContain('run_generation');
     expect(MAX_PROTOCOL_RETRIES).toBe(2);
+  });
+
+  it('ответ целиком в markdown-заборе ```json … ``` разбирается (LST-6 живой прогон)', () => {
+    const text = '```json\n{"action":"run_generation","args":{"seed":7},"thought":"попробуем seed 7"}\n```';
+    const parsed = parseActionMessage(text);
+    expect(parsed.action).toBe('run_generation');
+    expect(parsed.args).toEqual({ seed: 7 });
+    expect(parsed.thought).toBe('попробуем seed 7');
   });
 });
