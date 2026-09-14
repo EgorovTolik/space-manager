@@ -83,14 +83,14 @@ button.danger:hover:not(:disabled) {
    одинаковыми размерами (высота/padding/шрифт как у «Удалить»): бокс не зависит
    от ширины эмодзи/подписи, поэтому кнопки не съезжают и всегда равны. */
 .icon-btn {
-  display: inline-flex;
+  /* display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: center; */
   width: 36px;
   height: 27px;
-  padding: 0;
+  /* padding: 0;
   font-size: 14px;
-  margin: 2px 4px 2px 0;
+  margin: 2px 4px 2px 0; */
 }
 
 /* Ссылки, стилизованные как кнопки (ТЗ 03 §2: <a href> для навигации/архива). */
