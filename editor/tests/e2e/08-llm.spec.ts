@@ -3,6 +3,9 @@
 // - запуск: тело POST llm-generate (prompt/modelId/limits; пустые лимиты — не передаются),
 //   лог обновляется опросом ~1.5 c, кандидаты с «рекомендовано» и ссылками Viewer3D;
 // - «Стоп» → POST llm-stop, состояние stopped + error из ответа;
+// - totalTimeoutSec больше нет в UI: в тело POST llm-generate поле не попадает (LST-8);
+// - лог шагов — блоки-строки с отступом в контейнере с max-height/overflow-y (LST-8);
+// - note из статуса/журнала (авто-завершение по стагнации) показан под логом (LST-8);
 // - configured=false → блок «LLM не настроен», элементы disabled, обычная генерация работает;
 // - 409 LLM_SESSION_ACTIVE → «Уже идёт LLM-прогон» + наблюдение за активной сессией.
 import { expect, test } from '@playwright/test';
@@ -66,6 +69,12 @@ const STATUS_STOPPED = {
   startedAt: 't0',
   finishedAt: 't1',
 };
+// Авто-завершение по стагнации: статус возвращает note (LST-8).
+const STAGNATION_NOTE = 'Стагнация: последние итерации не улучшали результат — прогон завершён автоматически';
+const STATUS_STOPPED_NOTED = {
+  ...STATUS_STOPPED,
+  note: STAGNATION_NOTE,
+};
 
 const MODEL_SELECT = (page: import('@playwright/test').Page) => page.getByRole('combobox', { name: ru.llm.modelLabel });
 const PROMPT_AREA = (page: import('@playwright/test').Page) => page.getByRole('textbox', { name: ru.llm.promptLabel });
@@ -86,23 +95,26 @@ test.describe('LLM-генерация (docs-llm/06 §2)', () => {
     await expect(model).toHaveValue('eac-mac-ai/qwen.gguf');
     await expect(model.locator('option[value="eac-home-ai/home.gguf"]')).toHaveText('home.gguf (домашняя)');
 
-    // Заполняем форму: запрос + все три лимита.
+    // Заполняем форму: запрос + оба лимита (totalTimeoutSec в UI больше нет, LST-8).
     await PROMPT_AREA(page).fill('сделай коридор поменьше');
     await page.getByRole('textbox', { name: ru.llm.limitIterations }).fill('7');
     await page.getByRole('textbox', { name: ru.llm.limitTimeBudget }).fill('3.5');
-    await page.getByRole('textbox', { name: ru.llm.limitTotalTimeout }).fill('120');
 
     // До запуска «Стоп» недоступен.
     await expect(STOP_BTN(page)).toBeDisabled();
     await START_BTN(page).click();
 
-    // Тело POST llm-generate: prompt/modelId/limits (числами).
+    // Тело POST llm-generate: prompt/modelId/limits (числами) — БЕЗ totalTimeoutSec (LST-8).
     await expect.poll(() => cap.llmGenerateBodies.length, { timeout: 10_000 }).toBe(1);
     expect(cap.llmGenerateBodies[0]).toEqual({
       prompt: 'сделай коридор поменьше',
       modelId: 'eac-mac-ai/qwen.gguf',
-      limits: { maxIterations: 7, timeBudgetPerRun: 3.5, totalTimeoutSec: 120 },
+      limits: { maxIterations: 7, timeBudgetPerRun: 3.5 },
     });
+    expect('totalTimeoutSec' in (cap.llmGenerateBodies[0] as { totalTimeoutSec?: unknown })).toBe(false);
+    expect(
+      'totalTimeoutSec' in ((cap.llmGenerateBodies[0] as { limits?: Record<string, unknown> }).limits ?? {}),
+    ).toBe(false);
 
     // Во время прогона: строка состояния, «Стоп» активен, «Запустить» заблокирована.
     await expect(page.getByText(ru.llm.stateRunning)).toBeVisible({ timeout: 10_000 });
@@ -111,6 +123,20 @@ test.describe('LLM-генерация (docs-llm/06 §2)', () => {
 
     // Лог шагов обновляется опросом (~1.5 c): появляется второй шаг.
     await expect(page.getByText('2. read_result — отчёт: feasible, отклонения в норме (ок)')).toBeVisible({ timeout: 15_000 });
+
+    // LST-8: строки лога — блоки с вертикальным отступом; контейнер — max-height + overflow-y.
+    const logBox = page.locator('.llm-log');
+    await expect(logBox).toBeVisible();
+    const boxCss = await logBox.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { maxHeight: cs.maxHeight, overflowY: cs.overflowY };
+    });
+    expect(boxCss).toEqual({ maxHeight: '300px', overflowY: 'auto' });
+    const lineCss = await page
+      .locator('.llm-log-line')
+      .first()
+      .evaluate((el) => getComputedStyle(el).marginBottom);
+    expect(lineCss).toBe('8px');
 
     // Done: кандидаты с комментариями, «рекомендовано» у recommended, ссылки Viewer3D.
     await expect(page.getByText(ru.llm.stateDone)).toBeVisible({ timeout: 15_000 });
@@ -259,6 +285,7 @@ test.describe('LLM-генерация (docs-llm/06 §2)', () => {
           [lastId]: {
             prompt: 'предыдущий запрос',
             modelId: 'eac-mac-ai/qwen.gguf',
+            // legacy-запись с totalTimeoutSec — в строке лимитов не отображается (LST-8).
             limits: { maxIterations: 5, timeBudgetPerRun: 2, totalTimeoutSec: 180 },
             iterations: LOG_2,
             candidates: [{ file: 'result-old.txt', comment: 'прошлый вариант' }],
@@ -276,15 +303,104 @@ test.describe('LLM-генерация (docs-llm/06 §2)', () => {
     // Строка сессии: id · статус · модель.
     await expect(page.getByText(/20260913-175900.*завершена.*eac-mac-ai\/qwen\.gguf/)).toBeVisible({ timeout: 10_000 });
 
-    // Последняя сессия раскрывается автоматически: лимиты, лог шагов, кандидаты.
-    await expect(page.getByText(`Лимиты: maxIterations=5 · timeBudgetPerRun=2 · totalTimeoutSec=180`)).toBeVisible({ timeout: 10_000 });
+    // Последняя сессия раскрывается автоматически: лимиты (без legacy-totalTimeoutSec), лог, кандидаты.
+    await expect(page.getByText('Лимиты: maxIterations=5 · timeBudgetPerRun=2')).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('2. read_result — отчёт: feasible, отклонения в норме (ок)')).toBeVisible();
     await expect(page.getByText('result-old.txt', { exact: true })).toBeVisible();
     await expect(
       page.getByRole('link', { name: ru.llm.openViewer3d }).first(),
     ).toHaveAttribute('href', '/viewer3d?project=demo&result=result-old.txt');
   });
+
+  test('note из статуса (авто-завершение по стагнации) — заметный блок под логом (LST-8)', async ({ page }) => {
+    const cap = await mockProject(page, 'demo', FILES, {
+      llm: {
+        providers: PROVIDERS,
+        // два тика running → stopped с note.
+        status: (i) => (i < 2 ? STATUS_RUNNING_1 : STATUS_STOPPED_NOTED),
+      },
+    });
+    await page.goto('/');
+    await selectProject(page, 'demo');
+
+    await PROMPT_AREA(page).fill('разнеси рабочие места по углам');
+    await START_BTN(page).click();
+    await expect(page.getByText(ru.llm.stateStopped)).toBeVisible({ timeout: 15_000 });
+
+    // note — самодостаточный текст в выделенном (accent-фон) блоке под логом.
+    const noteEl = page.getByText(STAGNATION_NOTE, { exact: true });
+    await expect(noteEl).toBeVisible({ timeout: 10_000 });
+    const bg = await noteEl.evaluate((el) => getComputedStyle(el).backgroundColor);
+    expect(bg).not.toBe('rgba(0, 0, 0, 0)');
+
+    // Сам статус-ответ с note был (мок вернёт его вторым тиком).
+    expect(cap.llmGenerateBodies).toHaveLength(1);
+  });
+
+  test('длинный лог в журнале: контейнер ограничен по вертикали со своей прокруткой; note из журнала виден (LST-8)', async ({ page }) => {
+    const lastId = '20260913-175500';
+    // 40 шагов — контент заметно выше max-height контейнера (300 px).
+    const longLog = Array.from({ length: 40 }, (_, i) => ({
+      n: i + 1,
+      action: 'run_generation',
+      args: { seed: i },
+      ok: true,
+      summary: `итерация ${i + 1}: result-llm-${String.fromCharCode(97 + (i % 26))}.txt (exit 0)`,
+    }));
+    await mockProject(page, 'demo', FILES, {
+      llm: {
+        providers: PROVIDERS,
+        sessions: [
+          {
+            sessionId: lastId,
+            status: 'stopped',
+            modelId: 'eac-mac-ai/qwen.gguf',
+            promptPreview: 'длинный прогон',
+            startedAt: '2026-09-13T17:55:00.000Z',
+            finishedAt: '2026-09-13T18:40:00.000Z',
+          },
+        ],
+        sessionDetails: {
+          [lastId]: {
+            prompt: 'длинный прогон',
+            modelId: 'eac-mac-ai/qwen.gguf',
+            limits: {},
+            iterations: longLog,
+            status: 'stopped',
+            note: STAGNATION_NOTE,
+            startedAt: '2026-09-13T17:55:00.000Z',
+            finishedAt: '2026-09-13T18:40:00.000Z',
+          },
+        },
+      },
+    });
+    await page.goto('/');
+    await selectProject(page, 'demo');
+
+    // Последняя сессия раскрывается автоматически — 40 блоков-строк.
+    const lines = page.locator('.llm-log-line');
+    await expect(lines.first()).toBeVisible({ timeout: 10_000 });
+    await expect.poll(() => lines.count(), { timeout: 5_000 }).toBe(40);
+
+    // Контейнер: max-height 300 + своя прокрутка; видимая высота < высоты контента.
+    const box = page.locator('.llm-log');
+    const dims = await box.evaluate((el) => ({
+      maxHeight: getComputedStyle(el).maxHeight,
+      overflowY: getComputedStyle(el).overflowY,
+      visibleH: el.clientHeight,
+      contentH: el.scrollHeight,
+    }));
+    expect(dims.maxHeight).toBe('300px');
+    expect(dims.overflowY).toBe('auto');
+    expect(dims.contentH).toBeGreaterThan(40 * 15); // 40 строк × ~15 px — контента больше, чем видно
+    const bb = await box.boundingBox();
+    expect(bb !== null && bb.height <= 300 + 2).toBe(true);
+    expect(dims.visibleH).toBeLessThan(dims.contentH);
+
+    // note из журнала (авто-завершение по стагнации) виден под логом.
+    await expect(page.getByText(STAGNATION_NOTE, { exact: true })).toBeVisible();
+  });
 });
 
-// Значение плейсхолдера maxIterations (5 / 2.0 / 180 — docs-llm/05 §2).
+// Значение плейсхолдера maxIterations (5 / 2.0 — docs-llm/05 §2; totalTimeoutSec убран, LST-8).
 const LIMIT_DEFAULT_ITER = '5';

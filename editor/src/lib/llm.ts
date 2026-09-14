@@ -10,6 +10,8 @@ export interface LlmOutcome {
   candidates: { file: string; comment: string }[] | null;
   recommended: string | null;
   error: string | null;
+  /** Пояснение при авто-завершении по стагнации (LST-8); null — нет. */
+  note: string | null;
 }
 
 /** Live-вид статуса → итог (кандидаты/рекомендация — только при done, 06 §1.3). */
@@ -20,6 +22,7 @@ export function outcomeFromStatus(v: LlmStatusView): LlmOutcome {
     candidates: v.state === 'done' ? v.candidates ?? [] : null,
     recommended: v.state === 'done' ? (v.recommended ?? null) : null,
     error: v.error ?? null,
+    note: typeof v.note === 'string' && v.note.length > 0 ? v.note : null,
   };
 }
 
@@ -31,6 +34,7 @@ export function outcomeFromRecord(r: LlmJournalRecord): LlmOutcome {
     candidates: r.status === 'done' ? (r.candidates ?? []) : null,
     recommended: r.status === 'done' ? (r.recommended ?? null) : null,
     error: typeof r.error === 'string' ? r.error : null,
+    note: typeof r.note === 'string' && r.note.length > 0 ? r.note : null,
   };
 }
 
@@ -54,24 +58,25 @@ export function viewer3dHref(slug: string, file: string): string {
   return `/viewer3d?project=${encodeURIComponent(slug)}&result=${encodeURIComponent(file)}`;
 }
 
-/** Текстовые поля полей лимитов UI; пустое поле = не передаётся (дефолт сервера). */
+/** Текстовые поля полей лимитов UI; пустое поле = не передаётся (дефолт сервера).
+ * `totalTimeoutSec` больше нет в UI — сервер игнорирует поле (LST-8). */
 export interface LlmLimitInputs {
   maxIterations: string;
   timeBudgetPerRun: string;
-  totalTimeoutSec: string;
 }
 
-export type LlmLimitFieldError = 'maxIterations' | 'timeBudgetPerRun' | 'totalTimeoutSec' | null;
+export type LlmLimitFieldError = 'maxIterations' | 'timeBudgetPerRun' | null;
 
 /** Разбор полей лимитов: пустые поля пропускаются (в тело `limits` не попадают).
- * Валидация — как на сервере (05 §2): maxIterations — целое 1..50, остальные — число > 0. */
-/** Строка лимитов журнала («maxIterations=5 · timeBudgetPerRun=2 · totalTimeoutSec=180»);
- * незаданные значения помечаются `t.defaultMark` (из i18n). */
+ * Валидация — как на сервере (05 §2): maxIterations — целое 1..50, остальные — число > 0.
+ * Legacy-поле `totalTimeoutSec` во входных данных игнорируется (LST-8). */
+/** Строка лимитов журнала («maxIterations=5 · timeBudgetPerRun=2»);
+ * незаданные значения помечаются `t.defaultMark` (из i18n).
+ * Legacy-поле totalTimeoutSec в старых записях журнала не отображается (LST-8). */
 export function formatLlmLimits(limits: LlmLimits, t: { defaultMark: string }): string {
   return [
     `maxIterations=${limits.maxIterations ?? t.defaultMark}`,
     `timeBudgetPerRun=${limits.timeBudgetPerRun ?? t.defaultMark}`,
-    `totalTimeoutSec=${limits.totalTimeoutSec ?? t.defaultMark}`,
   ].join(' · ');
 }
 
@@ -86,12 +91,13 @@ export function parseLlmLimits(
     if (!Number.isInteger(n) || n < 1 || n > 50) return { limits, error: 'maxIterations' };
     limits.maxIterations = n;
   }
-  for (const key of ['timeBudgetPerRun', 'totalTimeoutSec'] as const) {
-    const t = inputs[key].trim();
-    if (t === '') continue;
-    const n = Number(t);
-    if (!Number.isFinite(n) || n <= 0) return { limits, error: key };
-    limits[key] = n;
+  {
+    const t = inputs.timeBudgetPerRun.trim();
+    if (t !== '') {
+      const n = Number(t);
+      if (!Number.isFinite(n) || n <= 0) return { limits, error: 'timeBudgetPerRun' };
+      limits.timeBudgetPerRun = n;
+    }
   }
   return { limits, error: null };
 }

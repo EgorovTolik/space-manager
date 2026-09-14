@@ -38,47 +38,52 @@ describe('viewer3dHref (формат существующей генерации
 
 describe('parseLlmLimits (пустое поле = дефолт сервера — не передаётся)', () => {
   it('все поля пустые → limits {}, ошибки нет', () => {
-    const r = parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '  ', totalTimeoutSec: '' });
+    const r = parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '  ' });
     expect(r).toEqual({ limits: {}, error: null });
   });
 
   it('валидные значения — числа (строка "2.0" → 2)', () => {
-    const r = parseLlmLimits({ maxIterations: '7', timeBudgetPerRun: '2.5', totalTimeoutSec: '180' });
-    expect(r).toEqual({ limits: { maxIterations: 7, timeBudgetPerRun: 2.5, totalTimeoutSec: 180 }, error: null });
+    const r = parseLlmLimits({ maxIterations: '7', timeBudgetPerRun: '2.5' });
+    expect(r).toEqual({ limits: { maxIterations: 7, timeBudgetPerRun: 2.5 }, error: null });
   });
 
   it('частично пустые — в limits только заданные', () => {
-    const r = parseLlmLimits({ maxIterations: '10', timeBudgetPerRun: '', totalTimeoutSec: '' });
+    const r = parseLlmLimits({ maxIterations: '10', timeBudgetPerRun: '' });
     expect(r).toEqual({ limits: { maxIterations: 10 }, error: null });
   });
 
+  it('legacy-поле totalTimeoutSec игнорируется (сервер не принимает, LST-8)', () => {
+    const r = parseLlmLimits({ maxIterations: '7', timeBudgetPerRun: '2.5', totalTimeoutSec: '180' } as Parameters<typeof parseLlmLimits>[0]);
+    expect(r).toEqual({ limits: { maxIterations: 7, timeBudgetPerRun: 2.5 }, error: null });
+    expect('totalTimeoutSec' in r.limits).toBe(false);
+  });
+
   it('maxIterations: не целое → ошибка', () => {
-    expect(parseLlmLimits({ maxIterations: '2.5', timeBudgetPerRun: '', totalTimeoutSec: '' }).error).toBe('maxIterations');
+    expect(parseLlmLimits({ maxIterations: '2.5', timeBudgetPerRun: '' }).error).toBe('maxIterations');
   });
 
   it('maxIterations: > 50 (защита от «500») → ошибка', () => {
-    expect(parseLlmLimits({ maxIterations: '500', timeBudgetPerRun: '', totalTimeoutSec: '' }).error).toBe('maxIterations');
-    expect(parseLlmLimits({ maxIterations: '51', timeBudgetPerRun: '', totalTimeoutSec: '' }).error).toBe('maxIterations');
+    expect(parseLlmLimits({ maxIterations: '500', timeBudgetPerRun: '' }).error).toBe('maxIterations');
+    expect(parseLlmLimits({ maxIterations: '51', timeBudgetPerRun: '' }).error).toBe('maxIterations');
   });
 
   it('maxIterations: 0 и отрицательные → ошибка; 1 и 50 — ок', () => {
-    expect(parseLlmLimits({ maxIterations: '0', timeBudgetPerRun: '', totalTimeoutSec: '' }).error).toBe('maxIterations');
-    expect(parseLlmLimits({ maxIterations: '-3', timeBudgetPerRun: '', totalTimeoutSec: '' }).error).toBe('maxIterations');
-    expect(parseLlmLimits({ maxIterations: '1', timeBudgetPerRun: '', totalTimeoutSec: '' }).error).toBeNull();
-    expect(parseLlmLimits({ maxIterations: '50', timeBudgetPerRun: '', totalTimeoutSec: '' }).error).toBeNull();
+    expect(parseLlmLimits({ maxIterations: '0', timeBudgetPerRun: '' }).error).toBe('maxIterations');
+    expect(parseLlmLimits({ maxIterations: '-3', timeBudgetPerRun: '' }).error).toBe('maxIterations');
+    expect(parseLlmLimits({ maxIterations: '1', timeBudgetPerRun: '' }).error).toBeNull();
+    expect(parseLlmLimits({ maxIterations: '50', timeBudgetPerRun: '' }).error).toBeNull();
   });
 
   it('maxIterations: нечисловое → ошибка', () => {
-    expect(parseLlmLimits({ maxIterations: 'abc', timeBudgetPerRun: '', totalTimeoutSec: '' }).error).toBe('maxIterations');
+    expect(parseLlmLimits({ maxIterations: 'abc', timeBudgetPerRun: '' }).error).toBe('maxIterations');
   });
 
-  it('timeBudgetPerRun/totalTimeoutSec: ≤ 0 и нечисловые → ошибка; дробные > 0 — ок', () => {
-    expect(parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '0', totalTimeoutSec: '' }).error).toBe('timeBudgetPerRun');
-    expect(parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '-1', totalTimeoutSec: '' }).error).toBe('timeBudgetPerRun');
-    expect(parseLlmLimits({ maxIterations: '', timeBudgetPerRun: 'x', totalTimeoutSec: '' }).error).toBe('timeBudgetPerRun');
-    expect(parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '', totalTimeoutSec: '0' }).error).toBe('totalTimeoutSec');
-    const r = parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '0.5', totalTimeoutSec: '3600' });
-    expect(r).toEqual({ limits: { timeBudgetPerRun: 0.5, totalTimeoutSec: 3600 }, error: null });
+  it('timeBudgetPerRun: ≤ 0 и нечисловые → ошибка; дробные > 0 — ок', () => {
+    expect(parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '0' }).error).toBe('timeBudgetPerRun');
+    expect(parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '-1' }).error).toBe('timeBudgetPerRun');
+    expect(parseLlmLimits({ maxIterations: '', timeBudgetPerRun: 'x' }).error).toBe('timeBudgetPerRun');
+    const r = parseLlmLimits({ maxIterations: '', timeBudgetPerRun: '0.5' });
+    expect(r).toEqual({ limits: { timeBudgetPerRun: 0.5 }, error: null });
   });
 });
 
@@ -98,7 +103,14 @@ describe('outcomeFromStatus / outcomeFromRecord (единый итог для li
       candidates: null,
       recommended: null,
       error: null,
+      note: null,
     });
+  });
+
+  it('note из статуса (авто-завершение по стагнации) → outcome.note; пустая строка → null', () => {
+    const o = outcomeFromStatus({ ...baseStatus, state: 'stopped', note: 'Стагнация: авто-завершение' });
+    expect(o.note).toBe('Стагнация: авто-завершение');
+    expect(outcomeFromStatus({ ...baseStatus, state: 'stopped', note: '' }).note).toBeNull();
   });
 
   it('done — кандидаты и рекомендация; пустые массивы/отсутствие → [] / null', () => {
@@ -134,7 +146,22 @@ describe('outcomeFromStatus / outcomeFromRecord (единый итог для li
       candidates: [{ file: 'a.txt', comment: 'c' }],
       recommended: 'a.txt',
       error: null,
+      note: null,
     });
+  });
+
+  it('note из журнала сессии → outcome.note', () => {
+    const rec: LlmJournalRecord = {
+      prompt: 'p',
+      modelId: 'p/m',
+      limits: {},
+      iterations: [],
+      status: 'stopped',
+      startedAt: 't0',
+      finishedAt: 't1',
+      note: 'Стагнация: последние итерации не улучшали результат — авто-завершение',
+    };
+    expect(outcomeFromRecord(rec).note).toBe('Стагнация: последние итерации не улучшали результат — авто-завершение');
   });
 
   it('журнал stopped без error → error: null', () => {
@@ -151,16 +178,20 @@ describe('outcomeFromStatus / outcomeFromRecord (единый итог для li
   });
 });
 
-describe('formatLlmLimits (строка лимитов журнала)', () => {
+describe('formatLlmLimits (строка лимитов журнала; totalTimeoutSec не выводится, LST-8)', () => {
   it('все заданные', () => {
-    expect(
-      formatLlmLimits({ maxIterations: 5, timeBudgetPerRun: 2, totalTimeoutSec: 180 }, { defaultMark: 'дефолт' }),
-    ).toBe('maxIterations=5 · timeBudgetPerRun=2 · totalTimeoutSec=180');
+    expect(formatLlmLimits({ maxIterations: 5, timeBudgetPerRun: 2 }, { defaultMark: 'дефолт' })).toBe(
+      'maxIterations=5 · timeBudgetPerRun=2',
+    );
   });
 
   it('незаданные — пометка из i18n', () => {
-    expect(formatLlmLimits({}, { defaultMark: 'дефолт' })).toBe(
-      'maxIterations=дефолт · timeBudgetPerRun=дефолт · totalTimeoutSec=дефолт',
-    );
+    expect(formatLlmLimits({}, { defaultMark: 'дефолт' })).toBe('maxIterations=дефолт · timeBudgetPerRun=дефолт');
+  });
+
+  it('legacy-запись журнала с totalTimeoutSec — поле не отображается', () => {
+    expect(
+      formatLlmLimits({ maxIterations: 5, timeBudgetPerRun: 2, totalTimeoutSec: 180 } as { maxIterations?: number; timeBudgetPerRun?: number; totalTimeoutSec?: number }, { defaultMark: 'дефолт' }),
+    ).toBe('maxIterations=5 · timeBudgetPerRun=2');
   });
 });

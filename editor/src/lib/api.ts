@@ -160,11 +160,11 @@ export async function getLlmProviders(): Promise<LlmProvidersResponse> {
   return (await res.json()) as LlmProvidersResponse;
 }
 
-/** Лимиты прогона (05 §2); пустые поля UI → поле не передаётся (дефолт сервера). */
+/** Лимиты прогона (05 §2); пустые поля UI → поле не передаётся (дефолт сервера).
+ * `totalTimeoutSec` больше не поддерживается — сервер игнорирует поле (LST-8). */
 export interface LlmLimits {
   maxIterations?: number;
   timeBudgetPerRun?: number;
-  totalTimeoutSec?: number;
 }
 
 /** Старт прогона: `POST …/llm-generate` → **202** `{sessionId}`.
@@ -198,6 +198,8 @@ export interface LlmStatusView {
   candidates?: { file: string; comment: string }[];
   recommended?: string;
   error: string | null;
+  /** Пояснение при авто-завершении по стагнации (LST-8). */
+  note?: string;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -251,6 +253,8 @@ export interface LlmJournalRecord {
   startedAt: string;
   finishedAt: string | null;
   error?: string;
+  /** Пояснение при авто-завершении по стагнации (LST-8). */
+  note?: string;
 }
 
 export async function loadLlmSession(slug: string, sessionId: string): Promise<LlmJournalRecord> {

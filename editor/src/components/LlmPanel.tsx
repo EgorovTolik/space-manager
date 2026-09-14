@@ -2,7 +2,8 @@
 // кнопкой «⚡ Генерировать размещение» (которая остаётся без изменений).
 // - textarea запроса + выпадающий список моделей (GET /api/llm/providers, optgroup по
 //   провайдерам; defaultModel — первым в своей группе и помечен) + поля лимитов
-//   с плейсхолдерами-дефолтами 5 / 2.0 / 180 (пусто = дефолт сервера — в тело не передаётся);
+//   с плейсхолдерами-дефолтами 5 / 2.0 (пусто = дефолт сервера — в тело не передаётся);
+//   totalTimeoutSec удалён из UI — сервер поле игнорирует (LST-8);
 // - «Запустить» → POST …/llm-generate (202 {sessionId}); во время прогона активна «Стоп»
 //   (POST …/llm-stop); лог шагов — опрос GET …/llm-status раз в ~1.5 c (вариант «б», без SSE),
 //   по терминальному состоянию опрос останавливается; ошибка опроса (сеть) — повтор
@@ -15,7 +16,7 @@
 // - история: последние сессии (GET …/llm-sessions) — время, статус, модель; по клику —
 //   журнал (iterations + кандидаты). При отсутствии активной сессии при загрузке
 //   раскрывается последняя (06 §2.2 «Последняя сессия»).
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ru } from '../i18n/ru';
 import {
@@ -27,14 +28,15 @@ import {
   startLlmGenerate,
   stopLlm,
 } from '../lib/api';
-import type { LlmJournalRecord, LlmProvidersResponse, LlmSessionSummary } from '../lib/api';
+import type { LlmJournalRecord, LlmLogEntry, LlmProvidersResponse, LlmSessionSummary } from '../lib/api';
 import { formatLlmLimits, formatLlmLogLine, outcomeFromRecord, outcomeFromStatus, parseLlmLimits, viewer3dHref } from '../lib/llm';
 import type { LlmOutcome } from '../lib/llm';
 
 /** Период опроса статуса (06 §1.3 — зафиксировано ~1.5 c). */
 const POLL_MS = 1500;
-/** Дефолты-плейсхолдеры лимитов (05 §2) — подсказка в полях, НЕ отправляются. */
-const LIMIT_DEFAULTS = { maxIterations: '5', timeBudgetPerRun: '2.0', totalTimeoutSec: '180' };
+/** Дефолты-плейсхолдеры лимитов (05 §2) — подсказка в полях, НЕ отправляются.
+ * totalTimeoutSec удалён из UI: сервер его больше не принимает (LST-8). */
+const LIMIT_DEFAULTS = { maxIterations: '5', timeBudgetPerRun: '2.0' };
 
 const sectionStyle: CSSProperties = { borderTop: '1px solid #ddd', paddingTop: 8, marginTop: 6 };
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 };
@@ -64,7 +66,6 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
   const [modelId, setModelId] = useState('');
   const [limIter, setLimIter] = useState('');
   const [limTb, setLimTb] = useState('');
-  const [limTo, setLimTo] = useState('');
 
   // ── Живой прогон (опрос ~1.5 c) ───────────────────────────────────────────────
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -90,7 +91,6 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
     setModelId('');
     setLimIter('');
     setLimTb('');
-    setLimTo('');
     setSessionId(null);
     setRunning(false);
     setStarting(false);
@@ -115,7 +115,7 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
           if (active !== undefined) {
             setSessionId(active.sessionId);
             setRunning(true);
-            setLive({ state: 'running', log: [], candidates: null, recommended: null, error: null });
+            setLive({ state: 'running', log: [], candidates: null, recommended: null, error: null, note: null });
           } else if (list.length > 0) {
             // Нет активной — панель показывает последнюю сессию (06 §2.2).
             await openJournal(list[0].sessionId);
@@ -192,7 +192,7 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
     if (!configured || running || starting) return;
     const p = prompt.trim();
     if (p.length === 0 || modelId === '') return; // кнопка в любом случае disabled
-    const parsed = parseLlmLimits({ maxIterations: limIter, timeBudgetPerRun: limTb, totalTimeoutSec: limTo });
+    const parsed = parseLlmLimits({ maxIterations: limIter, timeBudgetPerRun: limTb });
     if (parsed.error !== null) {
       setApiError(ru.llm.limitsInvalid);
       return;
@@ -209,7 +209,7 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
       setSessionId(id);
       setRunning(true);
       // Оптимистичный UI: строка состояния видна сразу, до первого тика опроса.
-      setLive({ state: 'running', log: [], candidates: null, recommended: null, error: null });
+      setLive({ state: 'running', log: [], candidates: null, recommended: null, error: null, note: null });
     } catch (e) {
       if (e instanceof ApiError && e.status === 409 && e.code === 'LLM_SESSION_ACTIVE') {
         // 06 §2.4: понятное сообщение + наблюдение за активной сессией.
@@ -221,7 +221,7 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
           if (active !== undefined) {
             setSessionId(active.sessionId);
             setRunning(true);
-            setLive({ state: 'running', log: [], candidates: null, recommended: null, error: null });
+            setLive({ state: 'running', log: [], candidates: null, recommended: null, error: null, note: null });
           }
         } catch {
           // список недоступен — остаёмся в сообщении об активной сессии
@@ -337,17 +337,6 @@ export default function LlmPanel(props: { slug: string }): JSX.Element {
                 style={{ width: 60, marginTop: 0 }}
               />
             </label>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#555' }}>
-              {ru.llm.limitTotalTimeout}
-              <input
-                value={limTo}
-                onChange={(e) => setLimTo(e.target.value)}
-                placeholder={LIMIT_DEFAULTS.totalTimeoutSec}
-                aria-label={ru.llm.limitTotalTimeout}
-                disabled={!configured || running}
-                style={{ width: 60, marginTop: 0 }}
-              />
-            </label>
           </div>
           <div style={{ color: '#888', fontSize: 11 }}>{ru.llm.limitsHint}</div>
 
@@ -459,10 +448,11 @@ function OutcomeBlock(props: OutcomeProps): JSX.Element {
       {outcome.log.length === 0 ? (
         <div style={{ color: '#888', fontSize: 12 }}>{ru.llm.noLog}</div>
       ) : (
-        <pre style={{ whiteSpace: 'pre-wrap', fontSize: 11, margin: '2px 0' }}>
-          {outcome.log.map((e) => formatLlmLogLine(e, props.logTexts)).join('\n')}
-        </pre>
+        <LogLines log={outcome.log} texts={props.logTexts} />
       )}
+
+      {/* note — пояснение авто-завершения по стагнации (LST-8); текст самодостаточный. */}
+      {outcome.note !== null && <div style={noteStyle}>{outcome.note}</div>}
 
       {outcome.state === 'done' && outcome.candidates !== null && (
         <div style={{ marginTop: 6 }}>
@@ -491,6 +481,36 @@ function OutcomeBlock(props: OutcomeProps): JSX.Element {
       {outcome.state !== 'running' && outcome.error !== null && (
         <div style={{ ...errorStyle, marginTop: 4 }}>{outcome.error}</div>
       )}
+    </div>
+  );
+}
+
+// ── Лог шагов: блоки-строки с отступом, свой контейнер со скроллом (LST-8) ─────
+// max-height + overflow-y: при длинном логe список не раздувает панель;
+// авто-прокрутка вниз только если пользователь не прокрутил вверх.
+const LOG_MAX_HEIGHT = 300;
+
+function LogLines(props: { log: LlmLogEntry[]; texts: { ok: string; failed: string; noAction: string } }): JSX.Element {
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (el === null) return;
+    // «Уже внизу» (с запасом 24 px) — доводим до конца; прокрутил вверх — не трогаем.
+    if (el.scrollHeight - el.scrollTop - el.clientHeight <= 24) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [props.log.length]);
+  return (
+    <div
+      ref={boxRef}
+      className="llm-log"
+      style={{ maxHeight: LOG_MAX_HEIGHT, overflowY: 'auto', fontSize: 11, fontFamily: 'monospace', margin: '2px 0' }}
+    >
+      {props.log.map((e) => (
+        <div key={e.n} className="llm-log-line" style={{ whiteSpace: 'pre-wrap', marginBottom: 8 }}>
+          {formatLlmLogLine(e, props.texts)}
+        </div>
+      ))}
     </div>
   );
 }

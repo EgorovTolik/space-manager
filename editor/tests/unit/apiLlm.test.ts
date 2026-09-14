@@ -206,11 +206,12 @@ describe('loadLlmSession (GET …/llm-sessions/<id>)', () => {
     const record = {
       prompt: 'p',
       modelId: 'p/m',
-      limits: { maxIterations: 5, timeBudgetPerRun: 2, totalTimeoutSec: 180 },
+      limits: { maxIterations: 5, timeBudgetPerRun: 2 },
       iterations: [{ n: 1, action: 'run_generation', args: { seed: 7 }, ok: true, summary: 'ok' }],
       candidates: [{ file: 'a.txt', comment: 'c' }],
       recommended: 'a.txt',
-      status: 'done',
+      status: 'stopped',
+      note: 'Стагнация: авто-завершение (LST-8)',
       startedAt: 't0',
       finishedAt: 't1',
     };

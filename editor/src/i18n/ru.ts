@@ -190,8 +190,7 @@ export const ru = {
     noModels: '— модели недоступны —',
     limitIterations: 'maxIterations',
     limitTimeBudget: 'timeBudgetPerRun (с)',
-    limitTotalTimeout: 'totalTimeoutSec (с)',
-    limitsHint: 'Пусто = дефолт сервера (5 / 2.0 / 180).',
+    limitsHint: 'Пусто = дефолт сервера (5 / 2.0).',
     limitsCaption: 'Лимиты:',
     limitsDefaultMark: 'дефолт',
     statusLabels: {
