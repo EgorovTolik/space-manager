@@ -150,13 +150,12 @@ test.describe.serial('LLM-e2e: реальный сервер + фейковый 
     await expect(page.getByText('LLM-прогон выполняется…')).toBeVisible();
     await expect(page.getByText('Прогон завершён')).toBeVisible({ timeout: 120_000 });
 
-    // ── Лог шагов: 4 строки «N. action — summary (ок)» (один <pre> панели LLM) ───
-    const logPre = page.locator('pre').filter({ hasText: 'run_generation' });
-    await expect(logPre).toHaveCount(1);
-    await expect(logPre).toContainText(/1\. run_generation — файл result-[\w.-]+\.txt \(exit 0\) \(ок\)/);
-    await expect(logPre).toContainText(/2\. read_result — отчёт «result-[\w.-]+\.txt» прочитан \(ок\)/);
-    await expect(logPre).toContainText(/3\. run_generation — файл result-[\w.-]+\.txt \(exit 0\) \(ок\)/);
-    await expect(logPre).toContainText(/4\. finish — завершено; кандидатов: 2 \(ок\)/);
+    // ── Лог шагов: 4 строки «N. action — summary (ок)» (контейнер .llm-log панели) ─
+    const logBox = page.locator('.llm-log');
+    await expect(logBox).toContainText(/1\. run_generation — файл result-[\w.-]+\.txt \(exit 0\) \(ок\)/);
+    await expect(logBox).toContainText(/2\. read_result — отчёт «result-[\w.-]+\.txt» прочитан \(ок\)/);
+    await expect(logBox).toContainText(/3\. run_generation — файл result-[\w.-]+\.txt \(exit 0\) \(ок\)/);
+    await expect(logBox).toContainText(/4\. finish — завершено; кандидатов: 2 \(ок\)/);
 
     // ── Кандидаты: два файла, у одного «рекомендовано», ссылки Viewer3D ──────────
     const [f1, f2] = resultFilesAsc();
