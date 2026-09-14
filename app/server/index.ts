@@ -847,8 +847,8 @@ const isDirectRun = process.argv[1] !== undefined && path.resolve(process.argv[1
 
 if (isDirectRun) {
   const port = Number(process.env.PORT ?? 4080);
-  // ТЗ 01 §7: локальный одноместный сервис — слушаем 127.0.0.1 явно (env HOST).
-  const host = process.env.HOST ?? '127.0.0.1';
+  // Слушаем все интерфейсы (0.0.0.0) для внешних подключений; override — env HOST.
+  const host = process.env.HOST ?? '0.0.0.0';
   createApp()
     .then((app) => {
       app.listen(port, host, () => {
