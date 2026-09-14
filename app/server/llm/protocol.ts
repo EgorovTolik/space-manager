@@ -2,13 +2,21 @@
 // с учётом вложенных скобок и строковых литералов, валидация {action, args[, thought]}.
 // Чистые функции без IO.
 
-export type LlmActionName = 'run_generation' | 'read_result' | 'correct_result' | 'finish';
+export type LlmActionName =
+  | 'run_generation'
+  | 'read_result'
+  | 'correct_result'
+  | 'create_blockages_file'
+  | 'create_preset_file'
+  | 'finish';
 
-/** Известный набор действий (03 §1; исполнители — LST-4). */
+/** Известный набор действий (03 §1; исполнители — LST-4, маски — LST-7). */
 export const KNOWN_ACTIONS: readonly LlmActionName[] = [
   'run_generation',
   'read_result',
   'correct_result',
+  'create_blockages_file',
+  'create_preset_file',
   'finish',
 ];
 
@@ -37,7 +45,8 @@ export class ProtocolError extends Error {
 export const FOLLOWUP_MESSAGE =
   'Твой ответ не распознан как валидное действие. Верни строго валидный JSON в ' +
   'формате {"action": <имя>, "args": {...}}. Доступные действия: run_generation, ' +
-  'read_result, correct_result, finish. Схемы — в системном промпте.';
+  'read_result, correct_result, create_blockages_file, create_preset_file, finish. ' +
+  'Схемы — в системном промпте.';
 
 /** Повтор follow-up до 2 раз; после третьего неверного ответа сессия → error (03 §2.3). */
 export const MAX_PROTOCOL_RETRIES = 2;

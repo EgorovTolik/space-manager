@@ -74,8 +74,42 @@ function stripTrailingNewline(text: string): string {
   return text.replace(/\n+$/, '');
 }
 
+/** Таблица реестра типов проекта: id → символ → name (LST-7). */
+function typesTable(spec: SpecInfo): string {
+  const rows = Object.entries(spec.types).map(([id, t]) => `| ${id} | ${t.symbol} | ${t.name ?? '—'} |`);
+  return ['| id | символ | name |', '| --- | --- | --- |', ...rows].join('\n');
+}
+
+/** Краткое резюме правил размещения генератора по спеке (docs/04, docs/03 §4; LST-7). */
+function rulesSummary(spec: SpecInfo): string {
+  const { rules } = spec;
+  const lines: string[] = [];
+  lines.push(`- Связность кластеров и соседство считаются по ${rules.connectivity}-окрестности (диагональное касание учитывается).`);
+  if (rules.adjacency.allow !== null) {
+    const pairs = rules.adjacency.allow.map(([a, b]) => `${a}↔${b}`).join(', ');
+    lines.push(`- Соседство: жёсткий whitelist — разрешены ТОЛЬКО пары: ${pairs} (пары из forbidden всё равно запрещены).`);
+  } else if (rules.adjacency.forbidden.length > 0) {
+    const pairs = rules.adjacency.forbidden.map(([a, b]) => `${a}↔${b}`).join(', ');
+    lines.push(`- Соседство: default-open — любые пары разрешены, кроме запрещённых: ${pairs}.`);
+  } else {
+    lines.push('- Соседство: любые пары типов разрешены (ни allow, ни forbidden не заданы).');
+  }
+  const shapeMeaning: Record<string, string> = {
+    rectangle: 'ровно заполненный ограничивающий прямоугольник без «дыр»',
+    circle: 'клетки в радиусе R от целочисленного центра (расстояние Чебышёва), допуск по границе ≤ 3 клетки',
+    free: 'любая связная форма; солвер предпочитает выпуклые (заполненность bounding-box)',
+  };
+  for (const c of spec.clusters) {
+    lines.push(`- Кластер ${c.id} (тип ${c.type}, доля ${c.areaPercent}%): shape=${c.shape} — ${shapeMeaning[c.shape] ?? 'неизвестная форма'}.`);
+  }
+  lines.push(`- fillAll: ${rules.fillAll} (${rules.fillAll ? 'вся площадь F используется, «лишнее» распределяется пропорционально долям' : 'остаток может остаться свободным'}) — значение спеки, ты НЕ изменяешь его.`);
+  lines.push(`- touchAll: ${rules.touchAll} (${rules.touchAll ? 'все кластеры обязаны примыкать друг к другу единым «комом» (жёстко)' : 'кластеры могут быть разнесены зазорами'}) — значение спеки, ты НЕ изменяешь его.`);
+  return lines.join('\n');
+}
+
 /** Сборка системного промпта (05 §3.1–§3.4). */
 export function buildSystemPrompt(input: SystemPromptInput): string {
+  const { spec } = input;
   const part1 = [
     '## 1. Описание системы',
     '',
@@ -87,7 +121,14 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     'решения по данным: предлагаешь параметры запусков, анализируешь отчёты, вносишь точечные правки маски.',
   ].join('\n');
 
-  const part2 = [
+  const canCreateBlockages = spec.blockedFile === null;
+  // run_generation: маска-оверрайды доступны только созданным тобой файлам (LST-7).
+  const maskArgsLine = [
+    canCreateBlockages ? '"blockagesFile":"blocked-llm-….txt",' : '',
+    '"presetsFile":"preset-llm-….txt"',
+  ].filter((s) => s !== '').join(' ');
+
+  const part2: string[] = [
     '## 2. Возможности (действия и ограничения)',
     '',
     'Каждый ответ — СТРОГО ОДИН валидный JSON вида {"action": <имя>, "args": {...}}',
@@ -98,27 +139,54 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     '1) run_generation — запуск генератора с оверрайдами параметров.',
     '   Схемы аргументов (все поля опциональны; {} = запуск спеки без оверрайдов):',
     '   {"action":"run_generation","args":{"seed":<целое ≥ 0>,"timeBudget":<число > 0, сек>,',
-    '    "nodeBudget":<целое > 0>,"areaPercent":{"<id кластера>":<новая доля % >}}} (любой подмножество полей).',
+    `    ${maskArgsLine}}} (любой подмножество полей).`,
+    '   blockagesFile/presetsFile — basename масок, созданных тобой инструментами ниже; при прогоне сервер',
+    '   использует их ВМЕСТО масок проекта (маску блокировок можно передать только когда у пользователя её нет; пресет',
+    '   заменяет собственный preset проекта, если он есть). Доля areaPercent проверяется на допуск ±10% от цели кластера,',
+    '   а при новой maskе блокировок — от НОВОЙ базы F (свободных клеток после твоих блокировок).',
     '2) read_result — чтение и анализ отчёта result-файла.',
     '   {"action":"read_result","args":{"file":"result-<YYYYMMDD-HHMMSS>.txt"}}.',
     '3) correct_result — точечная коррекция маски на уровне клеток.',
     '   {"action":"correct_result","args":{"baseFile":"result-….txt",',
     '    "edits":[{"x":<столбец 0..W-1>,"y":<ряд 0..H-1>,"symbol":"<один символ из {*, .} и символов типов спеки>"}],',
     '    "reason":"<почему правка, строка>"}}.',
-    '4) finish — завершение прогона с кандидатами для пользователя.',
+  ];
+  if (canCreateBlockages) {
+    part2.push(
+      '4) create_blockages_file — создание НОВОЙ маски блокировок проекта.',
+      '   {"action":"create_blockages_file","args":{"content":"<полный текст маски: ровно H строк × W символов,',
+      '    «*» = заблокировано, «.» = свободно>","reason":"<почему создаётся маска>"}}.',
+      '   Результат — новый файл blocked-llm-<YYYYMMDD-HHMMSS>.txt (spec.yaml не изменяется). После создания проценты',
+      '   кластеров считаются от НОВОЙ F (свободных клеток) — блокировки меняют базу процентов.',
+    );
+  }
+  const presetNum = canCreateBlockages ? 5 : 4;
+  const finishNum = canCreateBlockages ? 6 : 5;
+  part2.push(
+    `${presetNum}) create_preset_file — создание НОВОЙ маски пресета (неподвижные кластеры).`,
+    '   {"action":"create_preset_file","args":{"content":"<полный текст маски: ровно H строк × W символов;',
+    '    символы реестра типов спеки = неподвижные кластеры, «.» = пусто>","reason":"<почему создаётся пресет>"}}.',
+    '   Результат — новый файл preset-llm-<YYYYMMDD-HHMMSS>.txt и список областей (тип/клетки/bbox). Preset НЕ уменьшает F.',
+    '   Используй в run_generation с аргументом "presetsFile": при таком прогоне пресет проекта заменяется твоим.',
+    `${finishNum}) finish — завершение прогона с кандидатами для пользователя.`,
     '   {"action":"finish","args":{"candidates":[{"file":"result-….txt","comment":"<оценка относительно запроса>"}],',
     '    "recommended":"result-….txt"}} ("recommended" опционален = file одного из кандидатов).',
     '',
     'ОГРАНИЧЕНИЯ:',
-    '- Можно менять ТОЛЬКО seed, timeBudget, nodeBudget и areaPercent (±10% от цели кластера).',
-    '- ЗАПРЕЩЕНО: touchAll (критичная настройка пользователя), размер сетки, маски, типы, формы кластеров —',
-    '  такие аргументы сервер отвергнет сообщением-ошибкой.',
+    '- В run_generation можно менять ТОЛЬКО seed, timeBudget, nodeBudget и areaPercent (±10% от цели кластера)',
+    '  + имена своих масок blockagesFile/presetsFile.',
+    '- ЗАПРЕЩЕНО: touchAll/fillAll (критичные настройки пользователя), размер сетки, типы, формы кластеров,',
+    '  правила соседства — такие аргументы сервер отвергнет сообщением-ошибкой.',
+    '- Создание НОВЫХ масок (blocked-llm-*/preset-llm-*) разрешено инструментами create_*_file;',
+    '  существующие файлы проекта не изменяются никогда.',
     '- КРИТИЧНОЕ ПРАВИЛО: ты НИКОГДА не изменяешь существующий файл. Коррекция создаёт НОВЫЙ файл на основе',
     '  исходного — сервер сам копирует baseFile под новым именем, применяет edits и проверяет копию validate;',
     '  при нарушениях копия удаляется, исходный файл остаётся нетронутым.',
     '- Завершение прогона — только через finish с кандидатами и комментариями. Окончательный выбор результата',
     '  делает ПОЛЬЗОВАТЕЛЬ — не принимай решение за него.',
-  ].join('\n');
+  );
+
+  const part2Text = part2.join('\n');
 
   const part3 = [
     '## 3. Исходная конфигурация проекта',
@@ -130,6 +198,21 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     '```',
     '',
     masksSection(input),
+    '',
+    'Формат масок и координаты:',
+    `- Сетка проекта: W = ${spec.width} (столбцов) × H = ${spec.height} (рядов).`,
+    '- Координаты: x — столбец 0..W-1 слева направо, y — ряд 0..H-1 СВЕРХУ ВНИЗ; первая строка файла маски —',
+    '  это верхний ряд сетки (y=0), её первый символ — клетка (x=0, y=0).',
+    '- Маска блокировок: ровно H строк по W символов; «*» — заблокированная клетка (не входит в базу F),',
+    '  любой другой символ («.») — свободная.',
+    '- Пресет: тот же размер; символы реестра типов = неподвижные кластеры (каждая связная группа символов —',
+    '  отдельный кластер), «.» — пусто. Preset НЕ уменьшает F: база долей — незаблокированные клетки.',
+    '',
+    'Реестр типов проекта:',
+    typesTable(spec),
+    '',
+    'Правила размещения генератора (значения из спеки; ты их не изменяешь):',
+    rulesSummary(spec),
   ].join('\n');
 
   const part4 = [
@@ -141,7 +224,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     'по завершении вызови finish с кандидатами и комментариями.',
   ].join('\n');
 
-  return [part1, part2, part3, part4].join('\n\n');
+  return [part1, part2Text, part3, part4].join('\n\n');
 }
 
 /** Пути масок проекта (относительные от каталога спеки). */

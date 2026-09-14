@@ -43,9 +43,10 @@
 2. **Протокол JSON-в-тексте** без нативного function-calling (целевые модели —
    локальные GGUF): LLM отвечает сообщением, из которого сервер извлекает ПЕРВЫЙ
    `{...}` блок вида `{"action": <имя>, "args": {...}}` (+ опциональное `thought`).
-   Четыре действия: `run_generation`, `read_result`, `correct_result`, `finish` —
-   с точными схемами аргументов и валидацией оверрайдов
-   ([03-protocol-json](./03-protocol-json.md)).
+   Шесть действий: `run_generation`, `read_result`, `correct_result`,
+   `create_blockages_file`, `create_preset_file`, `finish` — с точными схемами
+   аргументов и валидацией оверрайдов (маски LLM — только НОВЫЕ файлы
+   `blocked-llm-*`/`preset-llm-*`) ([03-protocol-json](./03-protocol-json.md)).
 3. **Конфигурация провайдеров** — файл `llm.config.json` **в корне проекта**, в git —
    только `llm.config.example.json` (`apiKey: "ПРЕДСТАВЬТЕ_КЛЮЧ"`); модели —
    авто-опрос `{url}/v1/models` с кэшем TTL ~60 c; нет конфига → «LLM не настроен»,
@@ -53,9 +54,10 @@
 4. **Python-подкоманда `validate`** — проверка result-маски по спеке, только то, что
    проверяемо БЕЗ ассайнмента кластеров (6 правил); форматы файлов не меняются;
    Python 3.9 ([04-validate-subcommand](./04-validate-subcommand.md)).
-5. **Агентный цикл с лимитами**: maxIterations = 5, timeBudgetPerRun = 2.0 c,
-   totalTimeoutSec = 180 (дефолты, задаются в UI); состояния running → done | stopped
-   | error; «Стоп» = флаг + SIGKILL child-процесса; журнал
+5. **Агентный цикл с лимитами**: maxIterations = 5, timeBudgetPerRun = 2.0 c (дефолты,
+   задаются в UI); жёсткого временного лимита сессии НЕТ — завершение по finish/«Стопу»/
+   авто-завершению по стагнации; состояния running → done | stopped | error;
+   «Стоп» = флаг + SIGKILL child-процесса; журнал
    `workspace/<slug>/llm-sessions/<ts>.json` ([05-agent-loop-limits](./05-agent-loop-limits.md)).
 6. **Системный промпт на русском** — 4 части: описание системы, возможности (схемы
    действий + ограничения), исходная конфигурация (spec.yaml + маски, сырьём при

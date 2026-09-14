@@ -584,10 +584,13 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
     let limits: LlmLimits = { ...DEFAULT_LLM_LIMITS };
     if (obj.limits !== undefined) {
       if (typeof obj.limits !== 'object' || obj.limits === null || Array.isArray(obj.limits)) {
-        throw ApiError.llmInvalidBody('Поле limits — объект { maxIterations?, timeBudgetPerRun?, totalTimeoutSec? }');
+        throw ApiError.llmInvalidBody('Поле limits — объект { maxIterations?, timeBudgetPerRun? }');
       }
       const raw = obj.limits as Record<string, unknown>;
       for (const key of Object.keys(raw)) {
+        // totalTimeoutSec — legacy-поле старого UI: молча игнорируем (LST-7),
+        // жёсткого временного лимита сессии больше нет.
+        if (key === 'totalTimeoutSec') continue;
         if (!Object.prototype.hasOwnProperty.call(DEFAULT_LLM_LIMITS, key)) {
           throw ApiError.llmInvalidBody(`Неизвестный лимит «${key}»`);
         }
@@ -603,12 +606,6 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
           throw ApiError.llmInvalidBody('Лимит timeBudgetPerRun — число > 0 (секунды)');
         }
         limits.timeBudgetPerRun = raw.timeBudgetPerRun;
-      }
-      if (raw.totalTimeoutSec !== undefined) {
-        if (typeof raw.totalTimeoutSec !== 'number' || !Number.isFinite(raw.totalTimeoutSec) || raw.totalTimeoutSec <= 0) {
-          throw ApiError.llmInvalidBody('Лимит totalTimeoutSec — число > 0 (секунды)');
-        }
-        limits.totalTimeoutSec = raw.totalTimeoutSec;
       }
     }
     return { prompt: obj.prompt.trim(), modelId: obj.modelId, providerId, limits };

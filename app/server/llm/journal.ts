@@ -32,6 +32,8 @@ export interface LlmJournalRecord {
   iterations: LlmIterationLog[];
   candidates?: LlmCandidate[];
   recommended?: string;
+  /** Пояснение авто-завершения по стагнации (05 §2.1); старые записи — без поля. */
+  note?: string;
   status: LlmSessionStatus;
   startedAt: string;
   finishedAt: string | null;

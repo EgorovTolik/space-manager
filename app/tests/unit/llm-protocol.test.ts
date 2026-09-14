@@ -84,7 +84,14 @@ describe('parseActionMessage: валидные ответы', () => {
   });
 
   it('все четыре действия из известного набора', () => {
-    expect([...KNOWN_ACTIONS]).toEqual(['run_generation', 'read_result', 'correct_result', 'finish']);
+    expect([...KNOWN_ACTIONS]).toEqual([
+      'run_generation',
+      'read_result',
+      'correct_result',
+      'create_blockages_file',
+      'create_preset_file',
+      'finish',
+    ]);
     for (const action of KNOWN_ACTIONS) {
       expect(parseActionMessage(`{"action":"${action}","args":{}}`).action).toBe(action);
     }

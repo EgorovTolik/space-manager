@@ -17,6 +17,20 @@ export interface SpecCluster {
   shape: string;
 }
 
+/** Правила размещения спеки (docs/04-rules-and-adjacency.md); дефолты — при отсутствии полей. */
+export interface SpecRules {
+  /** Режим связи/соседства: 4 или 8 (текущий срез — 8). */
+  connectivity: number;
+  adjacency: {
+    /** Жёсткий whitelist пар типов; null = default-open. */
+    allow: Array<[string, string]> | null;
+    /** Blacklist пар типов, которым запрещено соприкасаться. */
+    forbidden: Array<[string, string]>;
+  };
+  fillAll: boolean;
+  touchAll: boolean;
+}
+
 export interface SpecInfo {
   width: number;
   height: number;
@@ -25,10 +39,42 @@ export interface SpecInfo {
   presetFile: string | null;
   types: Record<string, SpecType>;
   clusters: SpecCluster[];
+  /** Правила speки (lenient-разбор; дефолты docs/04 при отсутствии блока/полей). */
+  rules: SpecRules;
 }
 
 function fail(message: string): never {
   throw new Error(`спекация проекта: ${message}`);
+}
+
+/** Пары типов adjacency: массив [A, B] строк; null/undefined → дефолт. Lenient —
+ * невалидные пары пропускаются (полную валидацию делает солвер). */
+function parseTypePairs(value: unknown): Array<[string, string]> {
+  if (!Array.isArray(value)) return [];
+  const out: Array<[string, string]> = [];
+  for (const p of value) {
+    if (Array.isArray(p) && p.length === 2 && typeof p[0] === 'string' && typeof p[1] === 'string') {
+      out.push([p[0], p[1]]);
+    }
+  }
+  return out;
+}
+
+/** Разбор блока rules с дефолтами (docs/04): connectivity 8, default-open adjacency. */
+function parseRules(doc: Record<string, unknown>): SpecRules {
+  const raw = doc.rules;
+  const rec = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const connectivity = typeof rec.connectivity === 'number' && Number.isInteger(rec.connectivity) ? rec.connectivity : 8;
+  const adj = typeof rec.adjacency === 'object' && rec.adjacency !== null
+    ? (rec.adjacency as Record<string, unknown>)
+    : {};
+  const allow = Array.isArray(adj.allow) ? parseTypePairs(adj.allow) : null;
+  return {
+    connectivity,
+    adjacency: { allow, forbidden: parseTypePairs(adj.forbidden) },
+    fillAll: rec.fillAll === true,
+    touchAll: rec.touchAll === true,
+  };
 }
 
 /** Разбор spec.yaml в структуру (валидация минимальная — полную делает солвер). */
@@ -102,6 +148,7 @@ export function parseSpec(text: string): SpecInfo {
     presetFile: fileRef('presetFile'),
     types,
     clusters,
+    rules: parseRules(obj),
   };
 }
 

@@ -12,6 +12,10 @@ import type { AddressInfo } from 'node:net';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { runLlmSession } from '../../server/llm/agent.js';
+import { STAGNATION_NOTE } from '../../server/llm/stagnation.js';
+import { systemClock } from '../../server/workspace.js';
+
 import { api, startServer, type TestCtx } from '../unit/helpers.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
@@ -56,6 +60,10 @@ const SMALL_SPEC = [
 ].join('\n');
 
 const SMALL_MASK = ('.......' + '\n').repeat(2);
+
+/** Маленькая спека 7×2 БЕЗ маски блокировок (для create_blockages_file). */
+const NOBLOCK_SPEC = SMALL_SPEC.split('\n').filter((l) => !l.startsWith('blockedFile')).join('\n');
+const NOBLOCK_WALL = '.....**\n.......\n'; // 2 заблокированные клетки → F = 12, цели 6/6
 
 /** Тяжёлая спека 50×50 (touchAll + forbidden-пара + rectangle): поиск > 10 c. */
 const BIG_SPEC = [
@@ -117,6 +125,15 @@ type ScriptedReply = string | ((reqBody: ChatRequest) => string);
 function lastResultFile(body: ChatRequest): string | null {
   for (let i = body.messages.length - 1; i >= 0; i--) {
     const m = /"file":"(result-[0-9]{8}-[0-9]{6}(?:-[0-9]+)?\.txt)"/.exec(body.messages[i].content);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+/** Имя LLM-маски из истории (результат create_*_file), начиная с конца. */
+function lastMaskFile(body: ChatRequest, re: RegExp): string | null {
+  for (let i = body.messages.length - 1; i >= 0; i--) {
+    const m = re.exec(body.messages[i].content);
     if (m) return m[1];
   }
   return null;
@@ -264,6 +281,7 @@ interface StatusBody {
   log: Array<{ n: number; action: string | null; ok: boolean; summary: string }>;
   candidates?: Array<{ file: string; comment: string }>;
   recommended?: string;
+  note?: string;
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
@@ -336,7 +354,8 @@ describe('LLM-агентный цикл (integration: фейковый LLM + р�
     const journal = JSON.parse(await fsp.readFile(journalPath, 'utf8'));
     expect(journal.prompt).toBe('сделай размещение ближе к целям');
     expect(journal.modelId).toBe('test/test-model');
-    expect(journal.limits).toEqual({ maxIterations: 5, timeBudgetPerRun: 2.0, totalTimeoutSec: 180 });
+    // Жёсткого временного лимита сессии больше нет (LST-7): только счётчики/бюджеты.
+    expect(journal.limits).toEqual({ maxIterations: 5, timeBudgetPerRun: 2.0 });
     expect(journal.status).toBe('done');
     expect(typeof journal.startedAt).toBe('string');
     expect(typeof journal.finishedAt).toBe('string');
@@ -602,26 +621,204 @@ describe('LLM-агентный цикл (integration: фейковый LLM + р�
     expect((stop2.json as { state: string }).state).toBe('stopped');
   });
 
-  it('6. totalTimeoutSec (маленький) → stopped «превышен общий лимит времени»', async () => {
-    const fake = await fakeLlm(['{"action":"run_generation","args":{}}'], { delayMs: 3000 });
+  it('6. прогон длиннее 180 «стенковых» секунд (DI-часы) НЕ останавливается: totalTimeoutSec убран (LST-7)', async () => {
+    const slug = await makeProject('llm-notimeout', SMALL_SPEC, SMALL_MASK);
+    const base = await plainGenerate(slug);
+
+    // Прямой вызов runLlmSession с DI: фейковый chatFn продвигает «стеновое» время
+    // на 200 c за каждый LLM-вызов; жёсткого дедлайна нет — сессия доходит до finish.
+    let fakeNow = Date.now();
+    const readReply = JSON.stringify({ action: 'read_result', args: { file: base.file } });
+    const replies = [readReply, readReply, readReply, readReply,
+      JSON.stringify({ action: 'finish', args: { candidates: [{ file: base.file, comment: 'готово' }] } })];
+    let call = 0;
+
+    const outcome = await runLlmSession({
+      projectDir: path.join(ctx.ws, slug),
+      sessionId: '19700101-000000',
+      prompt: 'длинный прогон без жёсткого лимита времени',
+      modelId: 'test/test-model',
+      provider: { url: 'http://127.0.0.1:9', apiKey: 'x' }, // не используется: chatFn подставлен
+      limits: { maxIterations: 5, timeBudgetPerRun: 2.0 },
+      pythonBin: PYTHON_BIN,
+      now: systemClock,
+      dateNow: () => fakeNow,
+      chatFn: async () => {
+        fakeNow += 200_000; // после ПЕРВОГО ответа «истекло» уже >180 с
+        return replies[call++] ?? JSON.stringify({ action: 'finish', args: { candidates: [{ file: base.file, comment: 'x' }] } });
+      },
+    });
+
+    // 5 LLM-вызовов × +200 c = «прошло» 1000 с — остановка по времени не случилась.
+    expect(fakeNow).toBeGreaterThan(Date.now() + 900_000);
+    expect(outcome.status).toBe('done');
+
+    // Журнал на диске: done, лимиты без totalTimeoutSec.
+    const journal = JSON.parse(await fsp.readFile(path.join(ctx.ws, slug, 'llm-sessions/19700101-000000.json'), 'utf8'));
+    expect(journal.status).toBe('done');
+    expect(journal.limits).toEqual({ maxIterations: 5, timeBudgetPerRun: 2.0 });
+    expect(journal.iterations.map((it: { action: string }) => it.action)).toEqual(['read_result', 'read_result', 'read_result', 'read_result', 'finish']);
+
+    // Старое UI-поле totalTimeoutSec в теле llm-generate — молча игнорируется (совместимость):
+    // тело НЕ отвергается как invalid-body (400) — дальше срабатывает обычный
+    // контроль конфига/модели (503 без конфига или 422 неизвестный провайдер).
+    const compat = await api(ctx, 'POST', `/api/projects/${slug}/llm-generate`, {
+      prompt: 'x', modelId: 'test/test-model', limits: { maxIterations: 5, timeBudgetPerRun: 2.0, totalTimeoutSec: 180 },
+    });
+    expect(compat.status).not.toBe(400);
+    if (compat.status === 400) {
+      throw new Error(`totalTimeoutSec должен игнорироваться: ${JSON.stringify(compat.json)}`);
+    }
+  });
+
+  it('A. create_blockages_file (спека без blockedFile) → run_generation {blockagesFile} → finish', async () => {
+    const fake = await fakeLlm([
+      JSON.stringify({ action: 'create_blockages_file', args: { content: NOBLOCK_WALL, reason: 'маленькая стена в углу' } }),
+      (body) => {
+        const maskFile = lastMaskFile(body, /"file":"(blocked-llm-[0-9]{8}-[0-9]{6}(?:-[0-9]+)?\.txt)"/);
+        return JSON.stringify({ action: 'run_generation', args: { blockagesFile: maskFile, seed: 0 } });
+      },
+      (body) =>
+        JSON.stringify({
+          action: 'finish',
+          args: { candidates: [{ file: lastResultFile(body), comment: 'размещение с учётом стены' }] },
+        }),
+    ]);
     await writeLlmConfig(fake.url);
-    const slug = await makeProject('llm-timeout', SMALL_SPEC, SMALL_MASK);
+
+    // Спека без blockedFile; blocked.txt удаляется (каноническая тройка из payload).
+    const r = await api(ctx, 'POST', '/api/projects', { name: 'llm-blockages' });
+    expect(r.status).toBe(201);
+    const slug = (r.json as { project: { slug: string } }).project.slug;
+    const put = await api(ctx, 'PUT', `/api/projects/${slug}/files`, {
+      files: { 'spec.yaml': NOBLOCK_SPEC, 'preset.txt': SMALL_MASK },
+    });
+    expect(put.status).toBe(200);
+    expect(fs.existsSync(path.join(ctx.ws, slug, 'blocked.txt'))).toBe(false);
+    const specShaBefore = sha256(fs.readFileSync(path.join(ctx.ws, slug, 'spec.yaml')));
+
+    const start = await api(ctx, 'POST', `/api/projects/${slug}/llm-generate`, {
+      prompt: 'поставь стену и сгенерируй',
+      modelId: 'test/test-model',
+    });
+    expect(start.status).toBe(202);
+    const sessionId = (start.json as { sessionId: string }).sessionId;
+
+    const status = await pollStatus(slug, sessionId);
+    expect(status.state).toBe('done');
+    expect(status.log.map((l) => l.action)).toEqual(['create_blockages_file', 'run_generation', 'finish']);
+    expect(status.log.every((l) => l.ok)).toBe(true);
+
+    // НОВЫЙ файл маски в каталоге проекта; существующие файлы не тронуты.
+    const maskFiles = fs.readdirSync(path.join(ctx.ws, slug)).filter((n) => n.startsWith('blocked-llm-'));
+    expect(maskFiles).toHaveLength(1);
+    expect(fs.readFileSync(path.join(ctx.ws, slug, maskFiles[0]), 'utf8')).toBe(NOBLOCK_WALL);
+    expect(sha256(fs.readFileSync(path.join(ctx.ws, slug, 'spec.yaml')))).toBe(specShaBefore); // spec.yaml не изменён
+
+    // Feasible-результат с учётом НОВОЙ F (12 клеток) и кандидаты.
+    expect(status.log[1].summary).not.toContain('infeasible');
+    const file = status.candidates?.[0]?.file as string;
+    expect(file).toMatch(/^result-\d{8}-\d{6}(-\d+)?\.txt$/);
+    await expect(fsp.access(path.join(ctx.ws, slug, file))).resolves.toBeUndefined();
+  });
+
+  it('A2. create_blockages_file при существующей маске пользователя → отказ', async () => {
+    const slug = await makeProject('llm-blockages-busy', SMALL_SPEC, SMALL_MASK);
+    const base = await plainGenerate(slug);
+    const fake = await fakeLlm([
+      JSON.stringify({ action: 'create_blockages_file', args: { content: SMALL_MASK, reason: 'лишняя маска' } }),
+      JSON.stringify({ action: 'finish', args: { candidates: [{ file: base.file, comment: 'исходный вариант' }] } }),
+    ]);
+    await writeLlmConfig(fake.url);
+
+    const res = await api(ctx, 'POST', `/api/projects/${slug}/llm-generate`, { prompt: 'создай маску', modelId: 'test/test-model' });
+    expect(res.status).toBe(202);
+    const sessionId = (res.json as { sessionId: string }).sessionId;
+
+    const status = await pollStatus(slug, sessionId);
+    // Шаг создания маски — ok:false с причиной; LLM получила отказ и завершилась.
+    expect(status.log[0].action).toBe('create_blockages_file');
+    expect(status.log[0].ok).toBe(false);
+    expect(status.log[0].summary).toContain('уже есть маска блокировок');
+    // Ни одной LLM-маски в проекте; сессия завершилась (finish на базовом файле).
+    expect(fs.readdirSync(path.join(ctx.ws, slug)).filter((n) => n.startsWith('blocked-llm-'))).toEqual([]);
+    expect(status.state).toBe('done');
+  });
+
+  it('B. create_preset_file → run_generation {presetsFile}: regions в ответе, результат создан', async () => {
+    const PRESET = 'RRR....\n..CCC..\n';
+    const fake = await fakeLlm([
+      JSON.stringify({ action: 'create_preset_file', args: { content: PRESET, reason: 'фиксация комнат и коридора' } }),
+      (body) => {
+        const maskFile = lastMaskFile(body, /"file":"(preset-llm-[0-9]{8}-[0-9]{6}(?:-[0-9]+)?\.txt)"/);
+        return JSON.stringify({ action: 'run_generation', args: { presetsFile: maskFile, seed: 0 } });
+      },
+      (body) =>
+        JSON.stringify({
+          action: 'finish',
+          args: { candidates: [{ file: lastResultFile(body), comment: 'с фиксированными областями' }] },
+        }),
+    ]);
+    await writeLlmConfig(fake.url);
+    const slug = await makeProject('llm-preset', SMALL_SPEC, SMALL_MASK);
 
     const res = await api(ctx, 'POST', `/api/projects/${slug}/llm-generate`, {
-      prompt: 'медленная LLM',
+      prompt: 'зафиксируй области и сгенерируй',
       modelId: 'test/test-model',
-      limits: { maxIterations: 3, timeBudgetPerRun: 2.0, totalTimeoutSec: 1 },
     });
     expect(res.status).toBe(202);
     const sessionId = (res.json as { sessionId: string }).sessionId;
 
-    const status = await pollStatus(slug, sessionId, 30_000);
-    expect(status.state).toBe('stopped');
-    expect(status.error).toContain('превышен общий лимит времени');
+    const status = await pollStatus(slug, sessionId);
+    expect(status.state).toBe('done');
+    expect(status.log.map((l) => l.action)).toEqual(['create_preset_file', 'run_generation', 'finish']);
+    expect(status.log.every((l) => l.ok)).toBe(true);
 
-    // Солвер не запускался (ответ LLM пришёл позже дедлайна).
-    const files = fs.readdirSync(path.join(ctx.ws, slug)).filter((n) => n.startsWith('result-'));
-    expect(files).toEqual([]);
+    // НОВЫЙ файл пресета с заданным содержимым.
+    const presetFiles = fs.readdirSync(path.join(ctx.ws, slug)).filter((n) => n.startsWith('preset-llm-'));
+    expect(presetFiles).toHaveLength(1);
+    expect(fs.readFileSync(path.join(ctx.ws, slug, presetFiles[0]), 'utf8')).toBe(PRESET);
+
+    // В ответе create_preset_file — regions (ROOM 3 клетки, CORRIDOR 3 клетки).
+    const secondCall = fake.calls[1];
+    const userMsg = secondCall.messages[secondCall.messages.length - 1].content;
+    expect(userMsg).toContain('"regions"');
+    expect(userMsg).toContain('"type":"ROOM"');
+    expect(userMsg).toContain('"cells":3');
+    expect(userMsg).toContain('"type":"CORRIDOR"');
+
+    // Результат feasible (пресет не уменьшает F — цели 7/7 при F=14).
+    expect(status.log[1].summary).not.toContain('infeasible');
+    const file = status.candidates?.[0]?.file as string;
+    await expect(fsp.access(path.join(ctx.ws, slug, file))).resolves.toBeUndefined();
+  });
+
+  it('C. стагнация: модель зациклена на одном run_generation → авто-done с note и кандидатами', async () => {
+    const loop = JSON.stringify({ action: 'run_generation', args: { seed: 1 } });
+    const fake = await fakeLlm(Array.from({ length: 10 }, () => loop));
+    await writeLlmConfig(fake.url);
+    const slug = await makeProject('llm-stagnation', SMALL_SPEC, SMALL_MASK);
+
+    const res = await api(ctx, 'POST', `/api/projects/${slug}/llm-generate`, { prompt: 'генерируй', modelId: 'test/test-model' });
+    expect(res.status).toBe(202);
+    const sessionId = (res.json as { sessionId: string }).sessionId;
+
+    const status = await pollStatus(slug, sessionId);
+    // 3 идентичных исполняющих шага подряд — авто-завершение (finish LLM не вызывала).
+    expect(status.state).toBe('done');
+    expect(status.note).toBe(STAGNATION_NOTE);
+    expect(status.log.map((l) => l.action)).toEqual(['run_generation', 'run_generation', 'run_generation']);
+    // Кандидаты — ВСЕ созданные этой сессией файлы (в порядке создания).
+    expect(status.candidates).toHaveLength(3);
+    for (const [i, c] of status.candidates!.entries()) {
+      expect(c.comment).toBe(`создан в шаге ${i + 1}`);
+      await expect(fsp.access(path.join(ctx.ws, slug, c.file))).resolves.toBeUndefined();
+    }
+
+    // В журнале на диске — note и candidates.
+    const journal = JSON.parse(await fsp.readFile(path.join(ctx.ws, slug, 'llm-sessions', `${sessionId}.json`), 'utf8'));
+    expect(journal.note).toBe(STAGNATION_NOTE);
+    expect(journal.candidates).toHaveLength(3);
   });
 
   it('7. очередь: вторая llm-generate при активной → 409; после завершения — старт возможен', async () => {

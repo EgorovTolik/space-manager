@@ -17,26 +17,151 @@ import {
   type Clock,
 } from '../workspace.js';
 import { countFreeCells, maskToGrid, parseSpec, type SpecInfo } from './specInfo.js';
-import { buildClusterSummary, buildGeometrySummary, extractMapLines, parseTableRows } from './reportParse.js';
+import { timestampOf } from '../workspace.js';
+import { buildClusterSummary, buildGeometrySummary, connectedRegions, extractMapLines, parseTableRows } from './reportParse.js';
 
 // ---------------------------------------------------------------------------
 // Лимиты прогона (ТЗ docs-llm/05 §2)
 // ---------------------------------------------------------------------------
 
+/**
+ * Лимиты прогона. ЖЁСТКОГО временного лимита сессии НЕТ (LST-7): завершение —
+ * только finish, «Стоп» пользователя или авто-завершение по стагнации
+ * (docs-llm/05 §2.1). maxIterations — счётчик ЗАПУСКОВ генератора/коррекций,
+ * timeBudgetPerRun — бюджет СОЛВЕРА на запуск; оба не являются «временем работы модели».
+ */
 export interface LlmLimits {
   /** Максимум запусков run_generation + correct_result за прогон (≤ 50). */
   maxIterations: number;
   /** --time-budget каждого запуска, если LLM не передала свой (сек). */
   timeBudgetPerRun: number;
-  /** Стеновое время всей сессии (сек). */
-  totalTimeoutSec: number;
 }
 
 export const DEFAULT_LLM_LIMITS: LlmLimits = {
   maxIterations: 5,
   timeBudgetPerRun: 2.0,
-  totalTimeoutSec: 180,
 };
+
+// ---------------------------------------------------------------------------
+// Имена масок, созданных LLM (LST-7): НОВЫЕ файлы проекта, существующие не трогаются
+// ---------------------------------------------------------------------------
+
+/** Регуламенты имён LLM-масок (паттерн nextResultName: timestamp + суффиксы -1, -2). */
+export const LLM_BLOCKAGES_FILE_RE = /^blocked-llm-\d{8}-\d{6}(-\d+)?\.txt$/;
+export const LLM_PRESET_FILE_RE = /^preset-llm-\d{8}-\d{6}(-\d+)?\.txt$/;
+
+/** Проверка имени LLM-маски по виду (только basename, regex); null — не проходит. */
+export function checkLlmMaskName(name: unknown, kind: 'blockages' | 'preset'): string | null {
+  if (typeof name !== 'string' || name.length === 0) return null;
+  const re = kind === 'blockages' ? LLM_BLOCKAGES_FILE_RE : LLM_PRESET_FILE_RE;
+  return re.test(name) ? name : null;
+}
+
+/** Уникальное имя новой LLM-маски в каталоге проекта (суффиксы -1, -2 при коллизии). */
+async function nextLlmMaskName(
+  projectDir: string,
+  kind: 'blockages' | 'preset',
+  now: Clock,
+): Promise<string> {
+  const prefix = kind === 'blockages' ? 'blocked-llm' : 'preset-llm';
+  const base = `${prefix}-${timestampOf(now())}`;
+  let candidate = `${base}.txt`;
+  let suffix = 1;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    try {
+      await fsp.access(path.join(projectDir, candidate));
+    } catch {
+      return candidate; // не существует — свободно
+    }
+    candidate = `${base}-${suffix}.txt`;
+    suffix++;
+  }
+}
+
+/** Имена существующих LLM-масок в каталоге проекта (DI для чистых проверок). */
+export async function listLlmMaskFileNames(projectDir: string): Promise<Set<string>> {
+  let entries: string[] = [];
+  try {
+    const dirents = await fsp.readdir(projectDir, { withFileTypes: true });
+    entries = dirents.filter((d) => d.isFile()).map((d) => d.name);
+  } catch {
+    return new Set();
+  }
+  return new Set(entries.filter((n) => LLM_BLOCKAGES_FILE_RE.test(n) || LLM_PRESET_FILE_RE.test(n)));
+}
+
+// ---------------------------------------------------------------------------
+// Валидация содержимого масок (чистые функции, LST-7)
+// ---------------------------------------------------------------------------
+
+type MaskContentCheck = { ok: true; grid: string[][] } | { ok: false; error: string };
+
+/** Непустая строка reason (общее требование create_*_file). */
+function checkReason(reason: unknown): string | null {
+  if (typeof reason !== 'string' || reason.trim().length === 0) {
+    return 'аргумент `reason` — непустая строка (почему создаётся файл). Исправь аргументы.';
+  }
+  return null;
+}
+
+/**
+ * Валидация содержимого маски блокировок: ровно height строк по width символов
+ * (maskToGrid); «*» — заблокировано, любой другой символ — свободно. Чистая функция.
+ */
+export function checkBlockagesContent(content: unknown, spec: SpecInfo): MaskContentCheck {
+  if (typeof content !== 'string' || content.length === 0) {
+    return { ok: false, error: 'аргумент `content` — полный текст маски блокировок (строка). Исправь аргументы.' };
+  }
+  try {
+    return { ok: true, grid: maskToGrid(content, spec.width, spec.height) };
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        `маска блокировок не проходит по размеру (${spec.width}×${spec.height}): ${(err as Error).message}. ` +
+        `Файл — ровно ${spec.height} строк, каждая ровно ${spec.width} символов. Исправь content и повтори.`,
+    };
+  }
+}
+
+/**
+ * Валидация содержимого пресета: размер W×H + СТРОГАЯ проверка символов:
+ * только «.» и символы реестра типов спеки (каждая связная группа = отдельный
+ * неподвижный кластер; preset НЕ уменьшает F). Чистая функция.
+ */
+export function checkPresetContent(content: unknown, spec: SpecInfo): MaskContentCheck {
+  if (typeof content !== 'string' || content.length === 0) {
+    return { ok: false, error: 'аргумент `content` — полный текст маски пресета (строка). Исправь аргументы.' };
+  }
+  let grid: string[][];
+  try {
+    grid = maskToGrid(content, spec.width, spec.height);
+  } catch (err) {
+    return {
+      ok: false,
+      error:
+        `маска пресета не проходит по размеру (${spec.width}×${spec.height}): ${(err as Error).message}. ` +
+        `Файл — ровно ${spec.height} строк, каждая ровно ${spec.width} символов. Исправь content и повтори.`,
+    };
+  }
+  const allowed = new Set<string>(['.', ...Object.values(spec.types).map((t) => t.symbol)]);
+  for (let y = 0; y < grid.length; y++) {
+    for (let x = 0; x < grid[y].length; x++) {
+      const ch = grid[y][x];
+      if (!allowed.has(ch)) {
+        const symbols = `«.» и символы типов спеки: ${[...new Set(Object.values(spec.types).map((t) => t.symbol))].join(', ')}`;
+        return {
+          ok: false,
+          error:
+            `маска пресета: недопустимый символ «${ch}» в клетке (x=${x}, y=${y}). ` +
+            `Допустимы только ${symbols}. Исправь content и повтори.`,
+        };
+      }
+    }
+  }
+  return { ok: true, grid };
+}
 
 /** Допуск оверрайдов areaPercent от цели кластера (03 §4; тот же порог, что и валидатор). */
 export const AREA_TOLERANCE_PERCENT = 10;
@@ -45,26 +170,44 @@ export const AREA_TOLERANCE_PERCENT = 10;
 // Валидация оверрайдов run_generation (чистая функция, 03 §3–§4)
 // ---------------------------------------------------------------------------
 
-const ALLOWED_RUN_ARGS: ReadonlySet<string> = new Set(['seed', 'timeBudget', 'nodeBudget', 'areaPercent']);
+const ALLOWED_RUN_ARGS: ReadonlySet<string> = new Set([
+  'seed',
+  'timeBudget',
+  'nodeBudget',
+  'areaPercent',
+  'blockagesFile',
+  'presetsFile',
+]);
 
 export interface CheckedRunArgs {
   seed?: number;
   timeBudget?: number;
   nodeBudget?: number;
   areaPercent?: Record<string, number>;
+  /** Basename маски блокировок, созданной create_blockages_file (только если у пользователя нет своей). */
+  blockagesFile?: string;
+  /** Basename маски пресета, созданной create_preset_file (заменяет preset проекта при прогоне). */
+  presetsFile?: string;
 }
 
 export type OverrideCheck = { ok: true; args: CheckedRunArgs } | { ok: false; error: string };
 
 /**
  * Проверка аргументов run_generation. Разрешены ТОЛЬКО seed / timeBudget /
- * nodeBudget / areaPercent (в пределах допуска ±10% от цели кластера).
- * Любые прочие ключи (touchAll, grid, маски, types, shape и т.п.) — ошибка.
+ * nodeBudget / areaPercent (в пределах допуска ±10% от цели кластера) и имена
+ * LLM-масок blockagesFile / presetsFile (LST-7). Любые прочие ключи
+ * (touchAll, grid, чужие маски, types, shape и т.п.) — ошибка.
+ *
+ * `freeCells` — база F, ПО КОТОРОЙ считается допуск areaPercent: при mask-оверрайде
+ * блокировок runGeneration передаёт F, пересчитанный по НОВОЙ маске.
+ * `maskFileNames` (DI) — имена существующих LLM-масок каталога проекта; если передан,
+ * аргументы-маски обязаны входить в него (существование файла).
  */
 export function checkGenerationArgs(
   args: Record<string, unknown>,
   spec: SpecInfo,
   freeCells: number,
+  maskFileNames?: ReadonlySet<string>,
 ): OverrideCheck {
   const forbidden = Object.keys(args).filter((k) => !ALLOWED_RUN_ARGS.has(k));
   if (forbidden.length > 0) {
@@ -72,9 +215,51 @@ export function checkGenerationArgs(
       ok: false,
       error:
         `аргумент ${forbidden.map((k) => `«${k}»`).join(', ')} запрещён в рамках LLM-прогона: ` +
-        'можно менять только seed, timeBudget, nodeBudget и areaPercent (±10% от цели кластера). ' +
-        'Повтори действие без запрещённых аргументов.',
+        'можно менять только seed, timeBudget, nodeBudget, areaPercent (±10% от цели кластера) ' +
+        'и имена своих масок blockagesFile/presetsFile. Повтори действие без запрещённых аргументов.',
     };
+  }
+
+  // Маски LLM: только basename по регламенту; блок-маска — лишь если у пользователя её нет.
+  let blockagesFile: string | undefined;
+  if (args.blockagesFile !== undefined) {
+    if (spec.blockedFile !== null) {
+      return {
+        ok: false,
+        error:
+          `у пользователя уже есть маска блокировок (${spec.blockedFile}) — аргумент blockagesFile запрещён. ` +
+          'Повтори run_generation без него.',
+      };
+    }
+    const name = checkLlmMaskName(args.blockagesFile, 'blockages');
+    if (name === null) {
+      return {
+        ok: false,
+        error:
+          'аргумент `blockagesFile` — basename маски вида blocked-llm-<YYYYMMDD-HHMMSS>.txt, ' +
+          'созданной инструментом create_blockages_file (чужие/существующие файлы не используются). Исправь аргументы.',
+      };
+    }
+    if (maskFileNames !== undefined && !maskFileNames.has(name)) {
+      return { ok: false, error: `файл «${name}» не найден в каталоге проекта. Сначала создай его create_blockages_file.` };
+    }
+    blockagesFile = name;
+  }
+  let presetsFile: string | undefined;
+  if (args.presetsFile !== undefined) {
+    const name = checkLlmMaskName(args.presetsFile, 'preset');
+    if (name === null) {
+      return {
+        ok: false,
+        error:
+          'аргумент `presetsFile` — basename маски вида preset-llm-<YYYYMMDD-HHMMSS>.txt, ' +
+          'созданной инструментом create_preset_file (чужие/существующие файлы не используются). Исправь аргументы.',
+      };
+    }
+    if (maskFileNames !== undefined && !maskFileNames.has(name)) {
+      return { ok: false, error: `файл «${name}» не найден в каталоге проекта. Сначала создай его create_preset_file.` };
+    }
+    presetsFile = name;
   }
 
   let seed: number | undefined;
@@ -136,7 +321,10 @@ export function checkGenerationArgs(
     }
   }
 
-  return { ok: true, args: { seed, timeBudget, nodeBudget, areaPercent } };
+  return {
+    ok: true,
+    args: { seed, timeBudget, nodeBudget, areaPercent, ...(blockagesFile !== undefined ? { blockagesFile } : {}), ...(presetsFile !== undefined ? { presetsFile } : {}) },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -282,11 +470,25 @@ export class SessionFatalError extends Error {
 // run_generation (03 §4)
 // ---------------------------------------------------------------------------
 
-/** Одноразовая временная копия спеки с оверрайдами areaPercent (вНЕ проекта). */
-async function makeTempSpecCopy(
+/** Оверрайды временной копии спеки (LST-7: areaPercent + маски). */
+export interface TempSpecOverrides {
+  /** Новая доля (%) по id кластера. */
+  areaPercent?: Record<string, number>;
+  /** Абсолютный путь к маске блокировок вместо spec.blockedFile. */
+  blockedFile?: string;
+  /** Абсолютный путь к маске пресета вместо spec.presetFile. */
+  presetFile?: string;
+}
+
+/**
+ * Одноразовая временная копия спеки с оверрайдами (вНЕ проекта; файлы проекта
+ * не трогаются). Маски: заданный override → подставляется как есть (абсолютный
+ * путь); иначе существующие blockedFile/presetFile резолвятся в абсолютные.
+ */
+export async function makeTempSpecCopy(
   projectDir: string,
   specText: string,
-  overrides: Record<string, number>,
+  overrides: TempSpecOverrides,
 ): Promise<{ tempDir: string; specPath: string }> {
   let raw: unknown;
   try {
@@ -300,24 +502,30 @@ async function makeTempSpecCopy(
   const doc = raw as Record<string, unknown>;
   const clusters = doc.clusters;
   if (!Array.isArray(clusters)) throw new SessionFatalError('spec.yaml: блок clusters отсутствует');
+  const areaOverrides = overrides.areaPercent ?? {};
   let replaced = 0;
   for (const c of clusters) {
     if (typeof c !== 'object' || c === null) continue;
     const rec = c as Record<string, unknown>;
-    if (typeof rec.id === 'string' && Object.prototype.hasOwnProperty.call(overrides, rec.id)) {
-      rec.areaPercent = overrides[rec.id];
+    if (typeof rec.id === 'string' && Object.prototype.hasOwnProperty.call(areaOverrides, rec.id)) {
+      rec.areaPercent = areaOverrides[rec.id];
       replaced++;
     }
   }
-  // Пути масок — абсолютные к файлам проекта (резолвятся от каталога спеки).
-  for (const key of ['blockedFile', 'presetFile']) {
+  // Пути масок: override → как есть; иначе абсолютные к файлам проекта.
+  for (const key of ['blockedFile', 'presetFile'] as const) {
+    const ovr = overrides[key];
+    if (ovr !== undefined) {
+      doc[key] = ovr;
+      continue;
+    }
     const v = doc[key];
     if (typeof v === 'string' && v.length > 0) doc[key] = path.resolve(projectDir, v);
   }
   const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'space-manager-llm-'));
   const specPath = path.join(tempDir, 'spec.yaml');
   await fsp.writeFile(specPath, yaml.dump(doc), 'utf8');
-  if (replaced !== Object.keys(overrides).length) {
+  if (replaced !== Object.keys(areaOverrides).length) {
     // checkGenerationArgs уже проверил id; на всякий случай — явная ошибка.
     await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     throw new SessionFatalError('spec.yaml: не удалось применить оверрайды areaPercent');
@@ -326,18 +534,44 @@ async function makeTempSpecCopy(
 }
 
 export async function runGeneration(env: ActionEnv, args: Record<string, unknown>): Promise<ActionResult> {
-  const check = checkGenerationArgs(args, env.spec, env.freeCells);
+  const maskFileNames = await listLlmMaskFileNames(env.projectDir);
+
+  // База F для допуска areaPercent: при оверрайде блокировок — по НОВОЙ маске (LST-7).
+  let freeCells = env.freeCells;
+  if (
+    typeof args.blockagesFile === 'string' &&
+    checkLlmMaskName(args.blockagesFile, 'blockages') !== null &&
+    maskFileNames.has(args.blockagesFile)
+  ) {
+    try {
+      const text = await fsp.readFile(path.join(env.projectDir, args.blockagesFile), 'utf8');
+      freeCells = countFreeCells(maskToGrid(text, env.spec.width, env.spec.height));
+    } catch (err) {
+      return {
+        ok: false,
+        text: `Ошибка: маска блокировок «${args.blockagesFile}» не читается по размеру проекта: ${(err as Error).message}`,
+        summary: 'ошибка: маска blockagesFile не читается',
+      };
+    }
+  }
+
+  const check = checkGenerationArgs(args, env.spec, freeCells, maskFileNames);
   if (!check.ok) {
     return { ok: false, text: `Ошибка: ${check.error}`, summary: `ошибка: ${check.error}` };
   }
-  const { seed, timeBudget, nodeBudget, areaPercent } = check.args;
+  const { seed, timeBudget, nodeBudget, areaPercent, blockagesFile, presetsFile } = check.args;
   const budget = timeBudget ?? env.limits.timeBudgetPerRun;
 
   let tempDir: string | null = null;
   try {
     let specPath = path.join(env.projectDir, 'spec.yaml');
-    if (areaPercent !== undefined && Object.keys(areaPercent).length > 0) {
-      const tmp = await makeTempSpecCopy(env.projectDir, env.specText, areaPercent);
+    const hasOverrides = (areaPercent !== undefined && Object.keys(areaPercent).length > 0) || blockagesFile !== undefined || presetsFile !== undefined;
+    if (hasOverrides) {
+      const tmp = await makeTempSpecCopy(env.projectDir, env.specText, {
+        ...(areaPercent !== undefined ? { areaPercent } : {}),
+        ...(blockagesFile !== undefined ? { blockedFile: path.join(env.projectDir, blockagesFile) } : {}),
+        ...(presetsFile !== undefined ? { presetFile: path.join(env.projectDir, presetsFile) } : {}),
+      });
       tempDir = tmp.tempDir;
       specPath = tmp.specPath;
     }
@@ -416,6 +650,94 @@ export async function runGeneration(env: ActionEnv, args: Record<string, unknown
       await fsp.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// create_blockages_file (LST-7): НОВАЯ маска блокировок проекта (blocked-llm-*.txt)
+// ---------------------------------------------------------------------------
+
+/**
+ * Создание маски блокировок. Доступно ТОЛЬКО если spec.blockedFile === null
+ * (у пользователя нет своей маски — иначе сервер возвращает LLM ошибку).
+ * Создаёт НОВЫЙ файл `blocked-llm-<YYYYMMDD-HHMMSS>.txt`; spec.yaml не трогает.
+ */
+export async function createBlockagesFile(env: ActionEnv, args: Record<string, unknown>): Promise<ActionResult> {
+  if (env.spec.blockedFile !== null) {
+    return {
+      ok: false,
+      text:
+        `Ошибка: у пользователя уже есть маска блокировок (${env.spec.blockedFile}) — создание LLM-маски запрещено. ` +
+        'Работай с существующей маской.',
+      summary: 'ошибка: у пользователя уже есть маска блокировок',
+    };
+  }
+  const contentCheck = checkBlockagesContent(args.content, env.spec);
+  if (!contentCheck.ok) {
+    return { ok: false, text: `Ошибка: ${contentCheck.error}`, summary: `ошибка: ${contentCheck.error}` };
+  }
+  const reasonError = checkReason(args.reason);
+  if (reasonError !== null) {
+    return { ok: false, text: `Ошибка: ${reasonError}`, summary: 'ошибка: отсутствует reason' };
+  }
+
+  const name = await nextLlmMaskName(env.projectDir, 'blockages', env.now);
+  // Записываем канонизированный текст (CRLF → LF); маска валидирована по размеру.
+  await fsp.writeFile(path.join(env.projectDir, name), String(args.content).replace(/\r\n/g, '\n'), 'utf8');
+
+  const freeCells = countFreeCells(contentCheck.grid);
+  const blockedCells = env.spec.width * env.spec.height - freeCells;
+  return {
+    ok: true,
+    text:
+      `Результат create_blockages_file: ${JSON.stringify({
+        file: name,
+        blockedCells,
+        freeCells,
+        previousFreeCells: env.freeCells,
+      })}` +
+      `\nТеперь проценты кластеров считаются от НОВОЙ базы F = freeCells (${freeCells} свободных клеток): ` +
+      'блокировки уменьшают базу процентов (docs/03 §2). Запускай генератор с аргументом '
+      + `"blockagesFile":"${name}" в run_generation.`,
+    summary: `создана маска блокировок ${name} (F: ${env.freeCells} → ${freeCells})`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// create_preset_file (LST-7): НОВЫЙ пресет проекта (preset-llm-*.txt)
+// ---------------------------------------------------------------------------
+
+/**
+ * Создание маски пресета — доступно ВСЕГДА. Создаёт НОВЫЙ файл
+ * `preset-llm-<YYYYMMDD-HHMMSS>.txt`; при прогоне с presetsFile заменяет
+ * собственный preset проекта. Ответ LLM включает связные области (regions).
+ */
+export async function createPresetFile(env: ActionEnv, args: Record<string, unknown>): Promise<ActionResult> {
+  const contentCheck = checkPresetContent(args.content, env.spec);
+  if (!contentCheck.ok) {
+    return { ok: false, text: `Ошибка: ${contentCheck.error}`, summary: `ошибка: ${contentCheck.error}` };
+  }
+  const reasonError = checkReason(args.reason);
+  if (reasonError !== null) {
+    return { ok: false, text: `Ошибка: ${reasonError}`, summary: 'ошибка: отсутствует reason' };
+  }
+
+  const name = await nextLlmMaskName(env.projectDir, 'preset', env.now);
+  await fsp.writeFile(path.join(env.projectDir, name), String(args.content).replace(/\r\n/g, '\n'), 'utf8');
+
+  const symbolToType = new Map<string, string>();
+  for (const [typeId, t] of Object.entries(env.spec.types)) symbolToType.set(t.symbol, typeId);
+  const regions = connectedRegions(contentCheck.grid)
+    .filter((r) => r.symbol !== '.')
+    .map((r) => ({ type: symbolToType.get(r.symbol) ?? null, symbol: r.symbol, cells: r.cells, bbox: r.bbox }));
+  return {
+    ok: true,
+    text:
+      `Результат create_preset_file: ${JSON.stringify({ file: name, regions })}` +
+      '\nНапоминание: preset НЕ уменьшает базу F — он задаёт неподвижные кластеры ' +
+      '(каждая связная группа символов = отдельный кластер), остальные клетки остаются свободными. '
+      + `Запускай генератор с аргументом "presetsFile":"${name}" в run_generation; при таком прогоне пресет проекта (если есть) заменяется твоим.`,
+    summary: `создан пресет ${name} (${regions.length} обл.)`,
+  };
 }
 
 // ---------------------------------------------------------------------------

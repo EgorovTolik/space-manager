@@ -11,6 +11,8 @@ import { buildSystemPrompt, maskPaths } from './session.js';
 import {
   buildActionEnv,
   correctResult,
+  createBlockagesFile,
+  createPresetFile,
   finish,
   readResult,
   runGeneration,
@@ -25,6 +27,7 @@ import {
   type LlmJournalRecord,
   type LlmSessionStatus,
 } from './journal.js';
+import { createStagnationDetector, STAGNATION_NOTE } from './stagnation.js';
 import type { Clock } from '../workspace.js';
 
 // ---------------------------------------------------------------------------
@@ -53,6 +56,9 @@ export function createLlmSessionController(): LlmSessionController & { abort: Ab
 // Запуск сессии
 // ---------------------------------------------------------------------------
 
+/** Исполняющие шаги, участвующие в детекции стагнации (05 §2.1). */
+const EXECUTING_ACTIONS: ReadonlySet<string> = new Set(['run_generation', 'correct_result']);
+
 export interface RunLlmSessionOptions {
   projectDir: string;
   /** id = имя журнала (YYYYMMDD-HHMMSS); null — создать новый. */
@@ -70,7 +76,7 @@ export interface RunLlmSessionOptions {
   now: Clock;
   /** Таймаут child-процесса валидатора, мс (дефолт — таймаут генерации). */
   validateTimeoutMs?: number;
-  /** Стеновое «сейчас» для totalTimeoutSec (DI для тестов). */
+  /** Стеновое «сейчас» (DI для тестов; жёсткого временного лимита сессии нет — LST-7). */
   dateNow?: () => number;
   /** Вызов LLM (DI для тестов; дефолт — chatCompletion из client.ts). */
   chatFn?: (opts: ChatOptions) => Promise<string>;
@@ -91,7 +97,6 @@ const DEFAULT_VALIDATE_TIMEOUT_MS = 60_000;
  * фиксируются в журнале — функция НЕ бросает исключений наружу.
  */
 export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmSessionOutcome> {
-  const dateNow = opts.dateNow ?? Date.now;
   const chatFn = opts.chatFn ?? chatCompletion;
   const controller = opts.controller ?? createLlmSessionController();
   const validateTimeoutMs = opts.validateTimeoutMs ?? DEFAULT_VALIDATE_TIMEOUT_MS;
@@ -123,6 +128,21 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
     if (error !== undefined) record.error = error;
     await persist();
     return { sessionId, status, ...(error !== undefined ? { error } : {}) };
+  };
+
+  /** Авто-завершение по стагнации (05 §2.1): done с кандидатами, если сессия
+   *  создала result-файлы; иначе stopped. note — объяснение в журнале. */
+  const finishByStagnation = async (created: Array<{ file: string; stepN: number; feasible?: boolean }>): Promise<RunLlmSessionOutcome> => {
+    record.note = STAGNATION_NOTE;
+    if (created.length > 0) {
+      record.candidates = created.map((c) => ({ file: c.file, comment: `создан в шаге ${c.stepN}` }));
+      const feasible = [...created].reverse().find((c) => c.feasible === true);
+      if (feasible !== undefined) record.recommended = feasible.file;
+      await persist();
+      return finishStatus('done');
+    }
+    await persist();
+    return finishStatus('stopped');
   };
 
   try {
@@ -184,19 +204,18 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
       { role: 'system', content: systemPrompt },
       { role: 'user', content: opts.prompt },
     ];
-    const deadline = dateNow() + opts.limits.totalTimeoutSec * 1000;
     let actionCount = 0; // run_generation + correct_result (05 §2)
     let protocolErrorsInRow = 0;
     let limitRejectionSent = false;
+    const stagnation = createStagnationDetector();
+    /** Result-файлы, созданные этой сессией (в порядке создания; для стагнации). */
+    const createdFiles: Array<{ file: string; stepN: number; feasible?: boolean }> = [];
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
       // Стоп проверяется между шагами (05 §4 п.а).
       if (controller.isStopped()) {
         return finishStatus('stopped', 'остановлено пользователем');
-      }
-      if (dateNow() > deadline) {
-        return finishStatus('stopped', 'превышен общий лимит времени');
       }
 
       let raw: string;
@@ -207,12 +226,9 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
         return finishStatus('error', `LLM-провайдер недоступен: ${message}`);
       }
 
-      // Повторная проверка после ответа LLM: долгий вызов мог пересечь стоп/дедлайн.
-      if (controller.isStopped() || dateNow() > deadline) {
-        return finishStatus(
-          'stopped',
-          controller.isStopped() ? 'остановлено пользователем' : 'превышен общий лимит времени',
-        );
+      // Повторная проверка после ответа LLM: долгий вызов мог пересечь стоп.
+      if (controller.isStopped()) {
+        return finishStatus('stopped', 'остановлено пользователем');
       }
 
       const stepN = record.iterations.length + 1;
@@ -271,6 +287,14 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
             actionCount++;
             result = await correctResult(env, args);
             break;
+          case 'create_blockages_file':
+            // LST-7: создание новой маски; в счётчик maxIterations не входит.
+            result = await createBlockagesFile(env, args);
+            break;
+          case 'create_preset_file':
+            // LST-7: создание нового пресета; в счётчик maxIterations не входит.
+            result = await createPresetFile(env, args);
+            break;
           case 'finish':
             result = await finish(env, args);
             break;
@@ -293,6 +317,17 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
         ok: result.ok,
         summary: truncateSummary(`${thoughtPrefix}${result.summary}`),
       });
+
+      // Детекция стагнации (05 §2.1): 3 подряд идентичных ИСПОЛНЯЮЩИХ шага —
+      // модель перестала делать прогресс; авто-завершение.
+      if (EXECUTING_ACTIONS.has(action)) {
+        if (result.ok && result.file !== undefined) {
+          createdFiles.push({ file: result.file, stepN, ...(result.feasible !== undefined ? { feasible: result.feasible } : {}) });
+        }
+        if (stagnation.feed(action, args)) {
+          return await finishByStagnation(createdFiles);
+        }
+      }
 
       if (action === 'finish' && result.ok && result.done !== undefined) {
         record.candidates = result.done.candidates;
@@ -321,6 +356,8 @@ export interface LlmStatusView {
   candidates?: Array<{ file: string; comment: string }>;
   recommended?: string;
   error: string | null;
+  /** Пояснение авто-завершения (стагнация, 05 §2.1); старые записи — без поля. */
+  note?: string;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -333,6 +370,7 @@ export function statusViewFromRecord(record: LlmJournalRecord): LlmStatusView {
     startedAt: record.startedAt,
     finishedAt: record.finishedAt,
   };
+  if (record.note !== undefined) view.note = record.note;
   if (record.status === 'done') {
     view.candidates = record.candidates ?? [];
     if (record.recommended !== undefined) view.recommended = record.recommended;

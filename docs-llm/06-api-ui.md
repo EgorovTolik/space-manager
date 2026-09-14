@@ -36,7 +36,7 @@
 { "prompt": "сделай коридор поменьше, комнаты ближе к целям",   // строка, 1..4000 символов
   "modelId": "eac-mac-ai/Qwen3.6-35B-A3B-UD-Q6_K.gguf",        // "<provider>/<modelId>", provider ∈ конфиг
   "limits": {                                                  // опционально; незаданные → дефолты 05 §2
-    "maxIterations": 5, "timeBudgetPerRun": 2.0, "totalTimeoutSec": 180 } }
+    "maxIterations": 5, "timeBudgetPerRun": 2.0 } }
 ```
 
 Ответ **202**: `{ "sessionId": "20260913-200232" }` (id = имя журнала, 05 §5). Сессия
@@ -44,7 +44,7 @@
 
 | Код | HTTP | Когда |
 |---|---|---|
-| `LLM_INVALID_BODY` | 400 | пустой/некорректный `prompt`; нечисловые или ≤ 0 лимиты; `maxIterations > 50` |
+| `LLM_INVALID_BODY` | 400 | пустой/некорректный `prompt`; нечисловые или ≤ 0 лимиты (`maxIterations`, `timeBudgetPerRun`); `maxIterations > 50`; неизвестные поля `limits`. Старое поле `totalTimeoutSec` **молча игнорируется** (совместимость со старым UI, LST-7) |
 | `LLM_NOT_CONFIGURED` | 503 | `llm.config.json` отсутствует/невалиден (02 §5) |
 | `LLM_UNKNOWN_MODEL` | 422 | provider из `modelId` не в конфиге |
 | `LLM_SESSION_ACTIVE` | 409 | у проекта уже есть сессия `running` |
@@ -59,6 +59,7 @@ UI опрашивает раз в **~1.5 c** — зафиксированный 
     { "n": 1, "action": "run_generation", "ok": true, "summary": "…result-20260913-200232.txt (exit 0)" } ],
   "candidates": [ { "file": "…", "comment": "…" } ],   // только при done
   "recommended": "…",                          // только при done и если был указан
+  "note": "…",                                 // опционально: авто-завершение по стагнации (05 §2.1)
   "error": null,                              // текст причины при stopped/error
   "startedAt": "…", "finishedAt": null }
 ```
@@ -95,7 +96,7 @@ UI опрашивает раз в **~1.5 c** — зафиксированный 
 |---|---|
 | Textarea промпта | текст запроса; пустой → «Запустить» недоступна |
 | Выпадающий список моделей | из `GET /api/llm/providers`: «provider/modelId (подпись)»; дефолт — `defaultModel`; при сбое опроса отдельных моделей — то, что удалось получить |
-| Поля лимитов | три числовых поля с **дефолтами-плейсхолдерами: 5 / 2.0 / 180** (maxIterations / timeBudgetPerRun / totalTimeoutSec); пустые поля = дефолты — в тело `limits` не передаются |
+| Поля лимитов | два числовых поля с **дефолтами-плейсхолдерами: 5 / 2.0** (maxIterations / timeBudgetPerRun); пустые поля = дефолты — в тело `limits` не передаются. Жёсткого временного лимита сессии нет (LST-7): старое поле totalTimeoutSec, если приходит от старого UI, сервер молча игнорирует |
 | «Запустить» | `POST .../llm-generate`; пока сессия активна — заменена на «Стоп» (`POST .../llm-stop`) |
 | Лог шагов (вживую) | опрос `GET .../llm-status` раз в **~1.5 c** (вариант «б», без SSE): строки шагов «N. action — summary (ok/ошибка)»; по терминальному состоянию опрос останавливается |
 | Кандидаты (по завершении) | список: имя файла, комментарий LLM, отметка **«рекомендовано»**; у каждого — ссылка **«Открыть в Viewer3D»**: `/viewer3d/?project=<slug>&result=<file>` (существующий URL viewer3d). Выбор за пользователем |

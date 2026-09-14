@@ -46,7 +46,7 @@ describe('buildSystemPrompt — четыре части (ТЗ docs-llm/05 §3)',
     expect(p).toContain('"correct_result"');
     expect(p).toContain('"finish"');
     expect(p).toContain('КРИТИЧНОЕ ПРАВИЛО: ты НИКОГДА не изменяешь существующий файл');
-    expect(p).toContain('touchAll (критичная настройка пользователя)');
+    expect(p).toContain('ЗАПРЕЩЕНО: touchAll/fillAll (критичные настройки пользователя)');
     expect(p).toContain('## 3. Исходная конфигурация проекта');
     expect(p).toContain('## 4. Запрос пользователя');
     expect(p).toContain('«сделай коридор поменьше»');
@@ -57,6 +57,70 @@ describe('buildSystemPrompt — четыре части (ТЗ docs-llm/05 §3)',
     const p = buildSystemPrompt(base);
     expect(p).toContain('..*\n...\n...'); // blocked.txt как есть
     expect(p).toContain('R..\n...\n...'); // preset.txt как есть
+  });
+
+  it('create_blockages_file в промпте ТОЛЬКО когда spec.blockedFile === null (LST-7)', () => {
+    // У base есть blockedFile → схемы маски блокировок нет, пресета — есть.
+    const p = buildSystemPrompt(base);
+    expect(p).not.toContain('create_blockages_file');
+    expect(p).toContain('create_preset_file');
+
+    // Спека без blockedFile → оба инструмента и маска-оверрайды run_generation.
+    const noBlockedSpecText = SPEC_TEXT.split('\n').filter((l) => !l.startsWith('blockedFile')).join('\n');
+    const p2 = buildSystemPrompt({ ...base, spec: parseSpec(noBlockedSpecText), blockedText: null });
+    expect(p2).toContain('create_blockages_file');
+    expect(p2).toContain('"blockagesFile":"blocked-llm-….txt"');
+    // Пресет доступен всегда (заменяет preset проекта при прогоне).
+    expect(p2).toContain('create_preset_file');
+    expect(p2).toContain('пресет проекта заменяется твоим');
+  });
+
+  it('документация формата масок + реестр типов + резюме правил (LST-7)', () => {
+    const p = buildSystemPrompt(base);
+    expect(p).toContain('Формат масок и координаты:');
+    expect(p).toContain('Сетка проекта: W = 3 (столбцов) × H = 3 (рядов).');
+    expect(p).toContain('x — столбец 0..W-1 слева направо, y — ряд 0..H-1 СВЕРХУ ВНИЗ');
+    expect(p).toContain('«*» — заблокированная клетка (не входит в базу F)');
+    expect(p).toContain('Preset НЕ уменьшает F');
+    // Таблица реестра типов: id → символ → name.
+    expect(p).toContain('| id | символ | name |');
+    expect(p).toContain('| ROOM | R | Комната |');
+    // Резюме правил с реальными значениями спеки (дефолты: 8-окрестность, default-open).
+    expect(p).toContain('по 8-окрестности');
+    expect(p).toContain('Соседство: любые пары типов разрешены');
+    expect(p).toContain('Кластер room1 (тип ROOM, доля 50%): shape=free');
+    expect(p).toContain('fillAll: false');
+    expect(p).toContain('touchAll: false');
+    expect(p).toContain('Создание НОВЫХ масок (blocked-llm-*/preset-llm-*) разрешено инструментами create_*_file;');
+  });
+
+  it('запрещённые пары adjacency перечисляются реальными значениями спеки', () => {
+    const specText = [
+      'grid:',
+      '  width: 3',
+      '  height: 3',
+      'types:',
+      '  ROOM: { symbol: "R", name: Комната }',
+      '  CORRIDOR: { symbol: "C", name: Коридор }',
+      'rules:',
+      '  connectivity: 8',
+      '  adjacency:',
+      '    forbidden:',
+      '      - [ROOM, CORRIDOR]',
+      '  fillAll: true',
+      '  touchAll: true',
+      'clusters:',
+      '  - id: room1',
+      '    type: ROOM',
+      '    areaPercent: 50',
+      '    shape: rectangle',
+      '',
+    ].join('\n');
+    const p = buildSystemPrompt({ spec: parseSpec(specText), specText, blockedText: null, presetText: null, userPrompt: 'x' });
+    expect(p).toContain('default-open — любые пары разрешены, кроме запрещённых: ROOM↔CORRIDOR');
+    expect(p).toContain('fillAll: true (вся площадь F используется');
+    expect(p).toContain('touchAll: true (все кластеры обязаны примыкать');
+    expect(p).toContain('shape=rectangle — ровно заполненный ограничивающий прямоугольник без «дыр»');
   });
 
   it('большая сетка (> 2000 клеток) — компактная сводка F/blocked/пресеты с bbox', () => {
@@ -93,7 +157,7 @@ describe('журнал сессий — формат и IO (ТЗ docs-llm/05 §5
   const record: LlmJournalRecord = {
     prompt: 'сделай коридор поменьше',
     modelId: 'test/model-a',
-    limits: { maxIterations: 5, timeBudgetPerRun: 2.0, totalTimeoutSec: 180 },
+    limits: { maxIterations: 5, timeBudgetPerRun: 2.0 },
     iterations: [
       { n: 1, action: 'run_generation', args: { seed: 7 }, ok: true, summary: 'файл result-20260913-200232.txt (exit 0)' },
       { n: 2, action: null, args: {}, ok: false, summary: 'ошибка протокола: неверный JSON' },
