@@ -2,10 +2,11 @@
 // ссылки Viewer3D, разбор текстовых полей лимитов. Без React и fetch — unit-тестируемо.
 import type { LlmJournalRecord, LlmLimits, LlmLogEntry, LlmStatusView } from './api';
 
-/** Единое представление «итог/текущее состояние» для live-опроса и журнала истории. */
+/** Единое представление «итог/текущее состояние» для live-опроса и журнала истории.
+ * `raw` у шага есть только в полном журнале (llm-sessions/<id>); live-опрос его не даёт. */
 export interface LlmOutcome {
   state: 'running' | 'done' | 'stopped' | 'error';
-  log: LlmLogEntry[];
+  log: Array<LlmLogEntry & { raw?: string }>;
   /** null — кандидатов ещё нет (не done). */
   candidates: { file: string; comment: string }[] | null;
   recommended: string | null;

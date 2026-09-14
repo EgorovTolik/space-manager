@@ -490,7 +490,11 @@ function OutcomeBlock(props: OutcomeProps): JSX.Element {
 // авто-прокрутка вниз только если пользователь не прокрутил вверх.
 const LOG_MAX_HEIGHT = 300;
 
-function LogLines(props: { log: LlmLogEntry[]; texts: { ok: string; failed: string; noAction: string } }): JSX.Element {
+// `raw` у шага есть только в полном журнале сессии (не в llm-status) — блока нет без него.
+function LogLines(props: {
+  log: Array<LlmLogEntry & { raw?: string }>;
+  texts: { ok: string; failed: string; noAction: string };
+}): JSX.Element {
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = boxRef.current;
@@ -509,6 +513,28 @@ function LogLines(props: { log: LlmLogEntry[]; texts: { ok: string; failed: stri
       {props.log.map((e) => (
         <div key={e.n} className="llm-log-line" style={{ whiteSpace: 'pre-wrap', marginBottom: 8 }}>
           {formatLlmLogLine(e, props.texts)}
+          {/* raw есть только в полном журнале сессии (не в llm-status) — блока нет без него. */}
+          {typeof e.raw === 'string' && e.raw.length > 0 && (
+            <details style={{ marginTop: 4 }}>
+              <summary style={{ cursor: 'pointer', fontSize: 11 }}>{ru.llm.rawAnswer}</summary>
+              <pre
+                className="llm-raw"
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  margin: '4px 0 0',
+                  padding: 6,
+                  background: '#f5f5f5',
+                  border: '1px solid #ddd',
+                  borderRadius: 4,
+                }}
+              >
+                {e.raw}
+              </pre>
+            </details>
+          )}
         </div>
       ))}
     </div>

@@ -76,7 +76,7 @@ interface MockOpts {
   results?: { name: string; mtimeIso: string }[];
 }
 
-/** Мок fetch над /api (docs-unified/02): projects/file/files/generate/results. */
+/** Мок fetch над /api (docs-unified/02): projects/file/files/generate/results/types-catalog. */
 function mockFetch(files: Record<string, string>, opts: MockOpts = {}): Call[] {
   const projectName = opts.projectName ?? PROJECT;
   const projectSlug = opts.projectSlug ?? PROJECT;
@@ -90,7 +90,10 @@ function mockFetch(files: Record<string, string>, opts: MockOpts = {}): Call[] {
     let status = 200;
     let contentType = 'application/json';
     let bodyText = '';
-    if (url === '/api/projects') {
+    if (url === '/api/types-catalog') {
+      // Общий список типов (ST-2) — в интеграции каталог пустой.
+      bodyText = JSON.stringify({ types: {} });
+    } else if (url === '/api/projects') {
       bodyText = JSON.stringify({
         projects: [
           {

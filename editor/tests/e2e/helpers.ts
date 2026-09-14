@@ -64,6 +64,9 @@ export interface MockOpts {
   results?: { name: string; mtimeIso: string }[];
   /** LLM-эндпоинты (docs-llm/06 §1); без параметра — {configured:false}. */
   llm?: MockLlm;
+  /** Общий список типов (ST-2): тело GET /api/types-catalog.
+   * Без параметра — пустой каталог { types: {} } (реальный сервер не нужен). */
+  catalog?: Record<string, { symbol: string; name: string | null }>;
 }
 
 export async function mockProject(
@@ -207,6 +210,15 @@ export async function mockProject(
       body: JSON.stringify({ sessions: list }),
     });
   });
+
+  // Общий список типов (ST-2): глобальный каталог, по умолчанию пустой.
+  await page.route('**/api/types-catalog', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json; charset=utf-8',
+      body: JSON.stringify({ types: opts.catalog ?? {} }),
+    }),
+  );
 
   await page.route(/\/api\/projects\/[^/]+\/generate/, (route) => {
     const i = captured.events.filter((e) => e === 'generate').length;

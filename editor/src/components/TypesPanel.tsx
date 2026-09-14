@@ -6,11 +6,23 @@
 // Удаление типа: без ссылок — немедленное с подтверждением; если тип используется
 // (кластеры/adjacency/preset-клетки) — диалог ТЗ 04 §5 с каскадом: TYPE_REMOVE
 // (кластеры и пары adjacency отбрасывает store) + очистка preset-клеток символа.
-import { useState } from 'react';
+//
+// Секция «Общий список типов» (ST-2): глобальный каталог GET /api/types-catalog
+// (кэш на время сессии страницы; refreshTypesCatalog — после сохранения проекта).
+// Чекбокс отмечен ⇔ тип уже в spec.types. Отметить → TYPE_ADD определением из
+// каталога; снять → удаление тем же механизмом, что и ✕ реестра (removeType).
+// Блокировки — чистые guard-функции lib/typesCatalog: снятие запрещено, если тип
+// привязан к кластеру(ам) (сообщение под секцией, состояние не меняется); отметка
+// запрещена, если symbol занят другим типом проекта (V-TYPE-SYMDUP) — чекбокс
+// disabled с подсказкой. Типы проекта вне каталога — строки «вне общего списка».
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ru } from '../i18n/ru';
 import { useEditor } from '../state/editorStore';
 import { isValidTypeId, symbolError } from '../lib/fileUtils';
+import { catalogRows, catalogToggleDecision, getTypesCatalog, subscribeTypesCatalog } from '../lib/typesCatalog';
+import type { CatalogTypes } from '../lib/typesCatalog';
+import type { SpecDoc } from '../lib/types';
 
 const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' };
 const btnStyle: CSSProperties = { cursor: 'pointer', padding: '2px 6px' };
@@ -29,6 +41,35 @@ export default function TypesPanel(): JSX.Element {
   const { state, dispatch } = useEditor();
   const spec = state.spec;
   const [editingId, setEditingId] = useState<string | 'new' | null>(null);
+
+  // Общий список типов (ST-2): каталог с сессионным кэшем + refresh после сохранения.
+  const [catalog, setCatalog] = useState<CatalogTypes | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [blockMsg, setBlockMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Первый fetch: подписка уведомит, кэш уже заполнен — then() синхронно обновит.
+    void getTypesCatalog()
+      .then((t) => {
+        if (!cancelled) {
+          setCatalog(t);
+          setCatalogError(null);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setCatalogError(e instanceof Error ? e.message : String(e));
+      });
+    const unsub = subscribeTypesCatalog((t) => {
+      if (cancelled) return;
+      setCatalog(t);
+      setCatalogError(null);
+    });
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, []);
 
   if (!spec) {
     return (
@@ -53,6 +94,28 @@ export default function TypesPanel(): JSX.Element {
       }
     }
     return cells;
+  }
+
+  // Клик чекбокса «Общий список типов»: guard-решение → действие или сообщение о блоке.
+  function onCatalogToggle(id: string): void {
+    if (!spec || catalog === null) return;
+    setBlockMsg(null);
+    const d = catalogToggleDecision(catalog, spec, id);
+    switch (d.kind) {
+      case 'add':
+        dispatch({ type: 'TYPE_ADD', id, symbol: d.def.symbol, name: d.def.name });
+        break;
+      case 'remove':
+        removeType(id); // тот же механизм удаления (confirm + каскад preset-клеток)
+        break;
+      case 'blocked-clusters':
+        setBlockMsg(ru.types.catalogBlockedClusters.replace('{list}', d.clusterIds.join(', ')));
+        break;
+      case 'symbol-dup':
+        // Чекбокс disabled — недостижимо; страховка guard'а.
+        setBlockMsg(ru.types.symbolUsedBy.replace('{symbol}', d.symbol).replace('{id}', d.owner));
+        break;
+    }
   }
 
   function removeType(id: string): void {
@@ -137,7 +200,75 @@ export default function TypesPanel(): JSX.Element {
           </div>
         ))
       )}
+
+      {catalogSection(catalog, catalogError, spec, onCatalogToggle, blockMsg)}
     </section>
+  );
+}
+
+// ── Секция «Общий список типов» (ST-2) ─────────────────────────────────────────
+
+function catalogSection(
+  catalog: CatalogTypes | null,
+  catalogError: string | null,
+  spec: SpecDoc,
+  onToggle: (id: string) => void,
+  blockMsg: string | null,
+): JSX.Element {
+  const rows = catalog !== null ? catalogRows(catalog, spec) : [];
+  return (
+    <div className="types-catalog" style={{ borderTop: '1px dashed #ccc', marginTop: 8, paddingTop: 6 }}>
+      <strong>{ru.types.catalogTitle}</strong>
+      {catalogError !== null && (
+        <div style={errorStyle}>
+          {ru.types.catalogError} {catalogError}
+        </div>
+      )}
+      {catalog === null && catalogError === null && (
+        <div style={{ color: '#888', fontSize: 12 }}>{ru.types.catalogLoading}</div>
+      )}
+      {catalog !== null && rows.length === 0 && (
+        <div style={{ color: '#888', fontSize: 12 }}>{ru.types.catalogEmpty}</div>
+      )}
+      {rows.map((r) => {
+        const hint =
+          r.disableReason !== null
+            ? ru.types.symbolUsedBy.replace('{symbol}', r.disableReason.symbol).replace('{id}', r.disableReason.owner)
+            : undefined;
+        return (
+          <div key={r.id} style={rowStyle}>
+            <input
+              type="checkbox"
+              aria-label={r.id}
+              title={hint}
+              checked={r.checked}
+              disabled={r.disabled}
+              onChange={() => onToggle(r.id)}
+            />
+            <span
+              style={{
+                flex: '0 0 auto',
+                width: 22,
+                textAlign: 'center',
+                border: '1px solid #bbb',
+                borderRadius: 3,
+                fontWeight: 700,
+              }}
+            >
+              {r.symbol}
+            </span>
+            <span style={{ flex: '0 0 auto', minWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.id}</span>
+            {r.outsideCatalog && (
+              <span style={{ color: '#856404', fontSize: 11 }} title={ru.types.outsideCatalog}>
+                ({ru.types.outsideCatalog})
+              </span>
+            )}
+            <span style={{ flex: 1, color: '#777', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name ?? ''}</span>
+          </div>
+        );
+      })}
+      {blockMsg !== null && <div style={errorStyle}>{blockMsg}</div>}
+    </div>
   );
 }
 

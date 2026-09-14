@@ -111,6 +111,15 @@ export const ru = {
     cascadeOptions:
       '\nВарианты: (1) отменить — кнопка «Отмена»; (2) удалить тип, а также связанные кластеры и preset-клетки — кнопка «ОК».',
     empty: 'Типов нет. Нажмите «＋ Добавить».',
+    // Секция «Общий список типов» (ST-2: глобальный каталог GET /api/types-catalog).
+    catalogTitle: 'Общий список типов',
+    catalogLoading: 'Загрузка общего списка…',
+    catalogEmpty: 'Каталог пуст — сохраните типы проекта, и они появятся здесь.',
+    catalogError: 'Не удалось загрузить общий список типов:',
+    catalogBlockedClusters:
+      'Тип привязан к кластеру(ам) {list} — сначала измените или удалите кластер',
+    symbolUsedBy: 'символ «{symbol}» уже используется типом {id}',
+    outsideCatalog: 'вне общего списка',
   },
   rules: {
     connectivityLabel: 'Связность',
@@ -221,6 +230,7 @@ export const ru = {
     loadSessionError: 'Не удалось загрузить журнал сессии:',
     openJournal: 'Открыть журнал',
     closeJournal: 'Свернуть журнал',
+    rawAnswer: 'сырой ответ',
     promptPreviewAria: 'Запрос (кратко)',
   },
   hints: {

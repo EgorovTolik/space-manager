@@ -94,6 +94,19 @@ export async function saveProjectFiles(
   return (await res.json()) as SaveFilesResponse;
 }
 
+/** Общий список типов (ST-2): глобальный каталог `GET /api/types-catalog`.
+ * id → определение; сервер объединяет spec.yaml всех проектов + авто-регистрация
+ * при каждом сохранении/импорте. Конфликты: живёт первое зарегистрированное определение. */
+export interface TypesCatalog {
+  types: Record<string, { symbol: string; name: string | null }>;
+}
+
+export async function fetchTypesCatalog(): Promise<TypesCatalog> {
+  const res = await fetch('/api/types-catalog');
+  if (!res.ok) throw await toApiError(res);
+  return (await res.json()) as TypesCatalog;
+}
+
 /** Запись списка ревизий генерации (`GET …/<p>/results`, docs-unified/02 §6.11). */
 export interface ResultInfo {
   name: string; // имя файла result-<ts>.txt
@@ -241,12 +254,21 @@ export async function listLlmSessions(slug: string): Promise<LlmSessionSummary[]
   return body.sessions;
 }
 
+/** Шаг полного журнала сессии (05 §5): live-поля + аргументы действия и
+ * опциональный `raw` — ДОСЛОВНЫЙ ответ модели на этот шаг (усечён до 8000 символов;
+ * лёгкий опрос llm-status raw не содержит, старые журналы — тоже). */
+export interface LlmJournalIteration extends LlmLogEntry {
+  args: Record<string, unknown>;
+  /** Дословный ответ модели на шаг (нет — в UI раскрывающийся блок не показывается). */
+  raw?: string;
+}
+
 /** Полный журнал сессии (`GET …/llm-sessions/<id>`, формат 05 §5). */
 export interface LlmJournalRecord {
   prompt: string;
   modelId: string;
   limits: LlmLimits;
-  iterations: Array<LlmLogEntry & { args: Record<string, unknown> }>;
+  iterations: LlmJournalIteration[];
   candidates?: { file: string; comment: string }[];
   recommended?: string;
   status: 'running' | 'done' | 'stopped' | 'error';

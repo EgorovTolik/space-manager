@@ -35,6 +35,7 @@ import {
   saveProjectFiles,
 } from '../lib/api';
 import type { GenerateResult, ProjectInfo, ResultInfo } from '../lib/api';
+import { refreshTypesCatalog } from '../lib/typesCatalog'; // ST-2: каталог типов после сохранения
 import LlmPanel from './LlmPanel';
 
 // Дефолты новой спеки (ТЗ 02 §4 п.4 — те же, что в парсинге docs/03).
@@ -375,6 +376,9 @@ export default function ProjectFilesPanel(): JSX.Element {
       };
       markClean();
       setSavedAt(new Date());
+      // ST-2: сервер зарегистрировал типы в глобальном каталоге — обновляем
+      // секцию «Общий список типов» (новые типы проекта сразу видны отмеченными).
+      refreshTypesCatalog();
       return true;
     } catch (e) {
       setSaveError(`${ru.project.saveErrorTitle} ${errText(e)}`);
