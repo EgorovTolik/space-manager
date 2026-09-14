@@ -17,6 +17,11 @@ export interface LlmIterationLog {
   ok: boolean;
   /** Краткая строка на русском (thought LLM + результат действия/ошибка). */
   summary: string;
+  /** Дословный ответ модели на этот шаг (включая шаги с ошибкой протокола),
+   * усечённый до RAW_MAX_LEN (ST-1, отладка локальных моделей). Опционально:
+   * старые журналы — без поля и остаются читаемыми. В llm-status НЕ попадает
+   * (опрос остаётся лёгким) — только в полный журнал сессии и файл журнала. */
+  raw?: string;
 }
 
 export interface LlmCandidate {
@@ -43,6 +48,14 @@ export interface LlmJournalRecord {
 export const SESSIONS_DIR = 'llm-sessions';
 /** id сессии = имя журнала без .json (несёт timestamp, локальные часы системы проекта). */
 export const SESSION_ID_RE = /^\d{8}-\d{6}(-\d+)?$/;
+
+/** Максимальная длина дословного ответа модели в журнале (ST-1). */
+export const RAW_MAX_LEN = 8000;
+
+/** Усечение raw: при превышении RAW_MAX_LEN — префикс + «…(N символов)» в конце. */
+export function truncateRaw(text: string): string {
+  return text.length > RAW_MAX_LEN ? `${text.slice(0, RAW_MAX_LEN)}…(${text.length} символов)` : text;
+}
 
 export function sessionsDirOf(projectDir: string): string {
   return path.join(projectDir, SESSIONS_DIR);

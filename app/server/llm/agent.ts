@@ -23,6 +23,7 @@ import {
 import {
   nextSessionId,
   readJournalRecord,
+  truncateRaw,
   writeJournalRecord,
   type LlmJournalRecord,
   type LlmSessionStatus,
@@ -248,6 +249,7 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
           args: {},
           ok: false,
           summary: `ошибка протокола: ${err.message}`,
+          raw: truncateRaw(raw), // ST-1: дословный ответ (включая шаги с ошибкой протокола)
         });
         await persist();
         messages.push({ role: 'assistant', content: raw }, { role: 'user', content: FOLLOWUP_MESSAGE });
@@ -267,7 +269,7 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
         }
         limitRejectionSent = true;
         const message = `Лимит шагов исчерпан (${opts.limits.maxIterations}). Вызови finish с лучшими кандидатами.`;
-        record.iterations.push({ n: stepN, action, args, ok: false, summary: `${thoughtPrefix}${message}` });
+        record.iterations.push({ n: stepN, action, args, ok: false, summary: `${thoughtPrefix}${message}`, raw: truncateRaw(raw) });
         await persist();
         messages.push({ role: 'assistant', content: raw }, { role: 'user', content: message });
         continue;
@@ -306,7 +308,7 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
 
       // Стоп проверяется после каждого запуска солвера/валидатора (05 §4 п.б).
       if (controller.isStopped()) {
-        record.iterations.push({ n: stepN, action, args, ok: result.ok, summary: `${thoughtPrefix}${result.summary}` });
+        record.iterations.push({ n: stepN, action, args, ok: result.ok, summary: `${thoughtPrefix}${result.summary}`, raw: truncateRaw(raw) });
         return finishStatus('stopped', 'остановлено пользователем');
       }
 
@@ -316,6 +318,7 @@ export async function runLlmSession(opts: RunLlmSessionOptions): Promise<RunLlmS
         args,
         ok: result.ok,
         summary: truncateSummary(`${thoughtPrefix}${result.summary}`),
+        raw: truncateRaw(raw), // ST-1: дословный ответ модели на этот шаг
       });
 
       // Детекция стагнации (05 §2.1): 3 подряд идентичных ИСПОЛНЯЮЩИХ шага —

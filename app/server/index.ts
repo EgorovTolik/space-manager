@@ -22,6 +22,7 @@ import {
   DEFAULT_LLM_LIMITS,
   type LlmLimits,
 } from './llm/actions.js';
+import { ensureTypesCatalog, registerSpecIntoCatalog } from './typesCatalog.js';
 import {
   listJournals,
   nextSessionId,
@@ -228,6 +229,17 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
     }
   });
 
+  // ST-1: общий (глобальный) каталог типов <workspace>/types-catalog.json.
+  // Файла нет → seed по всем проектам workspace (spec.yaml, lenient), файл пишется;
+  // есть → читаем его (проекты не перечитываем).
+  app.get(
+    '/api/types-catalog',
+    asyncH(async (_req, res) => {
+      const catalog = await ensureTypesCatalog(cfg.workspaceDir, cfg.now);
+      res.json({ types: catalog.types });
+    }),
+  );
+
   // 6.2 список проектов (+ filesCount — решение ТЗ 05 §8)
   app.get(
     '/api/projects',
@@ -316,6 +328,16 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
       const qName = req.query.name;
       const requestedName = typeof qName === 'string' && qName.length > 0 ? qName : undefined;
       const outcome = await importProjectFromZip(cfg.workspaceDir, body, requestedName, cfg.now);
+
+      // ST-1: авто-регистрация типов импортированного spec.yaml в глобальном
+      // каталоге. Best-effort: сбой каталога НЕ ломает импорт — ответ как раньше.
+      try {
+        const specText = await fsp.readFile(path.join(cfg.workspaceDir, outcome.meta.slug, 'spec.yaml'), 'utf8');
+        await registerSpecIntoCatalog(cfg.workspaceDir, specText, cfg.now);
+      } catch (err) {
+        console.error('[space-unified] сбой авто-регистрации типов импорта в каталог:', err);
+      }
+
       res.status(201).json({
         project: outcome.meta,
         imported: outcome.imported,
@@ -372,6 +394,18 @@ export async function createApp(opts: AppOptions = {}): Promise<express.Express>
       );
       const meta = await readMeta(dir); // corrupted → PROJECT_CORRUPTED (мутация)
       await writeMeta(dir, { ...meta, updatedAt: cfg.now().toISOString() });
+
+      // ST-1: авто-регистрация типов нового spec.yaml в глобальном каталоге.
+      // Best-effort: сбой каталога НЕ ломает сохранение — ответ как раньше.
+      const specText = typeof files['spec.yaml'] === 'string' ? (files['spec.yaml'] as string) : null;
+      if (specText !== null) {
+        try {
+          await registerSpecIntoCatalog(cfg.workspaceDir, specText, cfg.now);
+        } catch (err) {
+          console.error('[space-unified] сбой авто-регистрации типов в каталог:', err);
+        }
+      }
+
       res.json({ saved: outcome.saved, deleted: outcome.deleted });
     }),
   );
